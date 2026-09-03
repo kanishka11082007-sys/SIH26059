@@ -1,0 +1,443 @@
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import { api } from '../services/api';
+
+export interface CanonicalVessel {
+  id: string;
+  name: string;
+  mmsi: string | number;
+  imo: string | number;
+  flag: string;
+  country: string;
+  operator: string;
+  polar_class: string;
+  latitude: number;
+  longitude: number;
+  sog: number;
+  speed: number;
+  cog: number;
+  heading: number;
+  nav_status?: string;
+  source: 'DETERMINISTIC_SIMULATION' | 'AIS' | string;
+  data_status: 'SIMULATED_VOYAGE' | 'LIVE' | string;
+  is_demo?: boolean;
+  destination_station_id?: string;
+  destination: string;
+  dest_lat?: number;
+  dest_lon?: number;
+  voyage_origin?: string;
+  mission_description?: string;
+  mission?: string;
+  eta?: string;
+  track?: [number, number][];
+}
+
+export interface RouteOption {
+  id: string;
+  name: string;
+  vessel_id?: string;
+  distance: number;
+  eta: string;
+  iceRisk?: string;
+  icebergRisk?: string;
+  weatherRisk?: string;
+  overallScore?: number;
+  recommended?: boolean;
+  rioScore?: string | number;
+  sicExposure?: number;
+  reason?: string;
+  decision_explanation?: string;
+  fuelConsumption?: string | number;
+  fuelSavings?: string;
+  safetyMargin?: string;
+  icebergEncounters?: number;
+  costs?: Record<string, number>;
+  cost_breakdown?: Record<string, number>;
+  path: [number, number][];
+  waypoints?: any[];
+}
+
+// Authoritative Canonical Polar Fleet (Fallback & Offline Dataset)
+export const CANONICAL_FLEET: CanonicalVessel[] = [
+  {
+    id: 'rv_sagar_nidhi',
+    name: 'R/V Sagar Nidhi — DEMO',
+    flag: '🇮🇳',
+    country: 'India',
+    operator: 'National Centre for Polar and Ocean Research (NCPOR)',
+    mmsi: '419071000',
+    imo: '9407988',
+    latitude: -54.2000,
+    longitude: 68.4000,
+    sog: 13.5,
+    speed: 13.5,
+    cog: 165.0,
+    heading: 165,
+    nav_status: 'Underway using engine',
+    source: 'DETERMINISTIC_SIMULATION',
+    data_status: 'SIMULATED_VOYAGE',
+    is_demo: true,
+    destination_station_id: 'bharati',
+    destination: 'Bharati Research Station',
+    dest_lat: -69.4068,
+    dest_lon: 76.1953,
+    polar_class: 'PC5 / Ice Class 1A Super',
+    voyage_origin: 'Mormugao Port / Cape Town',
+    mission_description: '43rd Indian Scientific Expedition oceanographic transect and resupply towards Larsemann Hills.',
+    eta: '72h 36m'
+  },
+  {
+    id: 'rv_polarstern',
+    name: 'R/V Polarstern — DEMO',
+    flag: '🇩🇪',
+    country: 'Germany',
+    operator: 'Alfred Wegener Institute (AWI)',
+    mmsi: '211281000',
+    imo: '7820497',
+    latitude: -69.2000,
+    longitude: -8.3000,
+    sog: 14.5,
+    speed: 14.5,
+    cog: 210.0,
+    heading: 210,
+    nav_status: 'Underway using engine',
+    source: 'DETERMINISTIC_SIMULATION',
+    data_status: 'SIMULATED_VOYAGE',
+    is_demo: true,
+    destination_station_id: 'neumayer_iii',
+    destination: 'Neumayer Station III',
+    dest_lat: -70.6744,
+    dest_lon: -8.2742,
+    polar_class: 'PC2 / Arc4 (Heavy Polar Icebreaker)',
+    voyage_origin: 'Cape Town Port (South Africa)',
+    mission_description: 'Weddell Sea continental shelf glaciology and Neumayer III annual observatory crew rotation.',
+    eta: '11h 33m'
+  },
+  {
+    id: 'rrs_sir_david_attenborough',
+    name: 'RRS Sir David Attenborough — DEMO',
+    flag: '🇬🇧',
+    country: 'United Kingdom',
+    operator: 'British Antarctic Survey (BAS)',
+    mmsi: '232029054',
+    imo: '9798222',
+    latitude: -63.1000,
+    longitude: -58.4000,
+    sog: 14.8,
+    speed: 14.8,
+    cog: 224.0,
+    heading: 224,
+    nav_status: 'Underway using engine',
+    source: 'DETERMINISTIC_SIMULATION',
+    data_status: 'SIMULATED_VOYAGE',
+    is_demo: true,
+    destination_station_id: 'palmer',
+    destination: 'Palmer Station',
+    dest_lat: -64.7744,
+    dest_lon: -64.0531,
+    polar_class: 'PC4 (Polar Logistics & Science)',
+    voyage_origin: 'Stanley Gateway Port',
+    mission_description: 'Adelaide & Anvers Island marine geophysics and Palmer Station science passage via Gerlache Strait.',
+    eta: '14h 20m'
+  },
+  {
+    id: 'aurora_australis_2015_16',
+    name: 'R/V Aurora Australis — DEMO',
+    flag: '🇦🇺',
+    country: 'Australia',
+    operator: 'Australian Antarctic Division (AAD)',
+    mmsi: '503000000',
+    imo: '8712582',
+    latitude: -65.2000,
+    longitude: 64.3000,
+    sog: 12.4,
+    speed: 12.4,
+    cog: 184.0,
+    heading: 184,
+    nav_status: 'Underway using engine',
+    source: 'DETERMINISTIC_SIMULATION',
+    data_status: 'SIMULATED_VOYAGE',
+    is_demo: true,
+    destination_station_id: 'davis',
+    destination: 'Davis Station',
+    dest_lat: -68.5764,
+    dest_lon: 77.9672,
+    polar_class: 'PC5 (Antarctic Research Vessel)',
+    voyage_origin: 'Hobart Port (Tasmania)',
+    mission_description: 'East Antarctic marine science transect approaching Vestfold Hills and Wilkes Land ice edge resupply.',
+    eta: '26h 30m'
+  },
+  {
+    id: 'sa_agulhas_ii',
+    name: 'S.A. Agulhas II — DEMO',
+    flag: '🇿🇦',
+    country: 'South Africa',
+    operator: 'Department of Forestry, Fisheries and the Environment (DFFE / SANAP)',
+    mmsi: '601362000',
+    imo: '9551131',
+    latitude: -68.5000,
+    longitude: -2.5000,
+    sog: 12.8,
+    speed: 12.8,
+    cog: 190.0,
+    heading: 190,
+    nav_status: 'Underway using engine',
+    source: 'DETERMINISTIC_SIMULATION',
+    data_status: 'SIMULATED_VOYAGE',
+    is_demo: true,
+    destination_station_id: 'sanae_iv',
+    destination: 'SANAE IV Base',
+    dest_lat: -71.6739,
+    dest_lon: -2.8408,
+    polar_class: 'PC5 / DNV ICE-10',
+    voyage_origin: 'Cape Town Port (South Africa)',
+    mission_description: 'Queen Maud Land annual relief voyage carrying cargo, fuel, and overwintering teams.',
+    eta: '24h 50m'
+  },
+  {
+    id: 'rv_nathaniel_palmer',
+    name: 'R/V Nathaniel B. Palmer — DEMO',
+    flag: '🇺🇸',
+    country: 'United States',
+    operator: 'US Antarctic Program Marine Logistics (USAP)',
+    mmsi: '367000000',
+    imo: '9007295',
+    latitude: -71.5000,
+    longitude: 176.2000,
+    sog: 14.2,
+    speed: 14.2,
+    cog: 192.0,
+    heading: 192,
+    nav_status: 'Underway using engine',
+    source: 'DETERMINISTIC_SIMULATION',
+    data_status: 'SIMULATED_VOYAGE',
+    is_demo: true,
+    destination_station_id: 'mcmurdo',
+    destination: 'McMurdo Station',
+    dest_lat: -77.8460,
+    dest_lon: 166.6681,
+    polar_class: 'PC3 (Heavy Research Icebreaker)',
+    voyage_origin: 'Lyttelton Port (New Zealand)',
+    mission_description: 'Ross Sea ecosystem & polynya study and heavy icebreaker escort into McMurdo Sound.',
+    eta: '22h 10m'
+  },
+  {
+    id: 'rv_shirase',
+    name: 'R/V Shirase (AGB-5003) — DEMO',
+    flag: '🇯🇵',
+    country: 'Japan',
+    operator: 'Japan National Institute of Polar Research (NIPR)',
+    mmsi: '431999000',
+    imo: '9400000',
+    latitude: -64.5000,
+    longitude: 40.2000,
+    sog: 15.0,
+    speed: 15.0,
+    cog: 175.0,
+    heading: 175,
+    nav_status: 'Underway using engine',
+    source: 'DETERMINISTIC_SIMULATION',
+    data_status: 'SIMULATED_VOYAGE',
+    is_demo: true,
+    destination_station_id: 'syowa',
+    destination: 'Syowa Station',
+    dest_lat: -69.0042,
+    dest_lon: 39.5806,
+    polar_class: 'PC2 (Heavy Military-Spec Polar Icebreaker)',
+    voyage_origin: 'Fremantle (Australia)',
+    mission_description: '65th JARE continental logistics and heavy ice penetration into Lützow-Holm Bay.',
+    eta: '15h 45m'
+  },
+  {
+    id: 'polar_research_vessel_demo',
+    name: 'Polar Research Vessel — DEMO',
+    flag: '🌐',
+    country: 'International / COMNAP',
+    operator: 'COMNAP Scientific Logistics',
+    mmsi: '211281001',
+    imo: '7820498',
+    latitude: -62.8000,
+    longitude: -59.5000,
+    sog: 13.5,
+    speed: 13.5,
+    cog: 215.0,
+    heading: 215,
+    nav_status: 'Underway using engine',
+    source: 'DETERMINISTIC_SIMULATION',
+    data_status: 'SIMULATED_VOYAGE',
+    is_demo: true,
+    destination_station_id: 'comandante_ferraz',
+    destination: 'Comandante Ferraz Antarctic Station',
+    dest_lat: -62.0833,
+    dest_lon: -58.3833,
+    polar_class: 'PC3 (Polar Icebreaker)',
+    voyage_origin: 'Bransfield Strait Operational Sector',
+    mission_description: 'Environmental research and multi-station logistic transect across South Shetland Islands.',
+    eta: '8h 15m'
+  }
+];
+
+interface FleetContextType {
+  fleet: CanonicalVessel[];
+  selectedVesselId: string;
+  selectedVessel: CanonicalVessel;
+  setSelectedVesselId: (id: string) => void;
+  selectedIcebergId: string | null;
+  setSelectedIcebergId: (id: string | null) => void;
+  routes: RouteOption[];
+  activeRouteId: string;
+  setActiveRouteId: (id: string) => void;
+  activeRoute: RouteOption | null;
+  isLoading: boolean;
+  refreshFleet: () => Promise<void>;
+}
+
+const FleetContext = createContext<FleetContextType | undefined>(undefined);
+
+const STORAGE_KEY = 'polarnav_selected_vessel_id';
+
+export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [fleet, setFleet] = useState<CanonicalVessel[]>(CANONICAL_FLEET);
+  const [selectedVesselId, setSelectedVesselIdState] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEY) || 'rv_sagar_nidhi';
+  });
+  const [selectedIcebergId, setSelectedIcebergId] = useState<string | null>(null);
+  const [routes, setRoutes] = useState<RouteOption[]>([]);
+  const [activeRouteId, setActiveRouteId] = useState<string>('route-b');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Set selected vessel with persistence
+  const setSelectedVesselId = useCallback((id: string) => {
+    setSelectedVesselIdState(id);
+    localStorage.setItem(STORAGE_KEY, id);
+  }, []);
+
+  // Fetch canonical fleet from backend
+  const refreshFleet = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await api.fleet();
+      if (res?.vessels?.length) {
+        const normalized: CanonicalVessel[] = res.vessels.map((v: any) => ({
+          id: v.id || String(v.mmsi),
+          name: v.name,
+          mmsi: v.mmsi || '',
+          imo: v.imo || '',
+          flag: v.flag || '⚓',
+          country: v.country || 'International',
+          operator: v.operator || 'Polar Research Agency',
+          polar_class: v.polar_class || v.polarClass || 'PC5',
+          latitude: Number(v.latitude),
+          longitude: Number(v.longitude),
+          sog: Number(v.sog ?? v.speed ?? 13.5),
+          speed: Number(v.speed ?? v.sog ?? 13.5),
+          cog: Number(v.cog ?? v.heading ?? 180),
+          heading: Number(v.heading ?? v.cog ?? 180),
+          nav_status: v.nav_status || 'Underway using engine',
+          source: v.source || 'DETERMINISTIC_SIMULATION',
+          data_status: v.data_status || 'SIMULATED_VOYAGE',
+          is_demo: v.is_demo !== undefined ? v.is_demo : true,
+          destination_station_id: v.destination_station_id,
+          destination: v.destination || v.destination_name || 'Antarctic Station',
+          dest_lat: v.dest_lat !== undefined ? Number(v.dest_lat) : undefined,
+          dest_lon: v.dest_lon !== undefined ? Number(v.dest_lon) : undefined,
+          voyage_origin: v.voyage_origin || 'Polar Gateway Port',
+          mission_description: v.mission_description || v.mission || '',
+          eta: v.eta || 'Calculating...',
+          track: v.track
+        }));
+        setFleet(normalized);
+      }
+    } catch (e) {
+      console.warn('[FleetContext] Backend unavailable, using canonical offline fleet.', e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshFleet();
+  }, [refreshFleet]);
+
+  // Derive active selected vessel
+  const selectedVessel = useMemo(() => {
+    return fleet.find(v => v.id === selectedVesselId || String(v.mmsi) === selectedVesselId) || fleet[0] || CANONICAL_FLEET[0];
+  }, [fleet, selectedVesselId]);
+
+  // Fetch / update corridors reactively for the selected vessel
+  useEffect(() => {
+    if (!selectedVessel) return;
+    
+    let isCancelled = false;
+    api.routes({
+      vesselId: selectedVessel.id,
+      destLat: selectedVessel.dest_lat,
+      destLon: selectedVessel.dest_lon,
+      destName: selectedVessel.destination
+    }).then((res) => {
+      if (isCancelled) return;
+      if (res?.routes?.length) {
+        const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => ({
+          id: r.id || (idx === 1 ? 'route-b' : idx === 2 ? 'route-c' : 'route-a'),
+          name: r.name || (idx === 1 ? 'ROUTE B (OPTIMAL)' : idx === 2 ? 'ROUTE C (SAFEST)' : 'ROUTE A (FASTEST)'),
+          vessel_id: selectedVessel.id,
+          distance: r.distance || r.distance_km || 3800,
+          eta: r.eta || '32h 05m',
+          iceRisk: r.iceRisk || r.ice_risk || (r.id?.includes('route-a') ? 'HIGH' : r.id?.includes('route-b') ? 'MODERATE' : 'LOW'),
+          icebergRisk: r.icebergRisk || 'LOW',
+          weatherRisk: r.weatherRisk || 'MODERATE',
+          overallScore: r.overallScore || (r.id?.includes('route-b') ? 92 : r.id?.includes('route-c') ? 84 : 48),
+          recommended: r.recommended ?? (r.id?.includes('route-b') || idx === 1),
+          rioScore: r.rioScore ?? r.rio_score ?? (r.id?.includes('route-a') ? -2.8 : r.id?.includes('route-b') ? 8.4 : 14.8),
+          sicExposure: r.sicExposure ?? (r.id?.includes('route-a') ? 65 : r.id?.includes('route-b') ? 22 : 6),
+          reason: r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
+          decision_explanation: r.decision_explanation || r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
+          fuelConsumption: r.fuelConsumption || r.fuel_estimate || '104 MT',
+          safetyMargin: r.safetyMargin || 'OPTIMAL',
+          costs: r.costs || r.cost_breakdown || {},
+          cost_breakdown: r.cost_breakdown || r.costs || {},
+          path: r.path || [],
+          waypoints: r.waypoints || []
+        }));
+        setRoutes(formatted);
+      }
+    }).catch(() => {});
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedVessel]);
+
+  // Derive active route
+  const activeRoute = useMemo(() => {
+    return routes.find(r => r.id === activeRouteId || r.id?.includes(activeRouteId)) || routes[0] || null;
+  }, [routes, activeRouteId]);
+
+  const value = useMemo(() => ({
+    fleet,
+    selectedVesselId,
+    selectedVessel,
+    setSelectedVesselId,
+    selectedIcebergId,
+    setSelectedIcebergId,
+    routes,
+    activeRouteId,
+    setActiveRouteId,
+    activeRoute,
+    isLoading,
+    refreshFleet
+  }), [fleet, selectedVesselId, selectedVessel, setSelectedVesselId, selectedIcebergId, routes, activeRouteId, activeRoute, isLoading, refreshFleet]);
+
+  return (
+    <FleetContext.Provider value={value}>
+      {children}
+    </FleetContext.Provider>
+  );
+};
+
+export function useFleet() {
+  const context = useContext(FleetContext);
+  if (!context) {
+    throw new Error('useFleet must be used within a FleetProvider');
+  }
+  return context;
+}

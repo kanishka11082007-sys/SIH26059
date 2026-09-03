@@ -1,0 +1,81 @@
+# =============================================================================
+# PolarNav (SIH26059) Root .gitignore
+# Prevents credentials, heavy binaries, build outputs & caches from git commit
+# =============================================================================
+
+# 1. Environment & Sensitive Credentials (CRITICAL)
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+!*.env.example
+
+# 2. Dependency Directories
+node_modules/
+*/node_modules/
+frontend/node_modules/
+SIH26059/frontend/node_modules/
+
+# 3. Python Bytecode & Virtual Environments
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 4. Testing & Caching
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.freebuff/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 5. Frontend Build Artifacts
+frontend/dist/
+frontend/build/
+SIH26059/frontend/dist/
+SIH26059/frontend/build/
+dist/
+.vite/
+*.local
+
+# 6. Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# 7. OS & IDE Configuration
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo

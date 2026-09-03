@@ -1,0 +1,8 @@
+{
+  "name": "PolarNav",
+  "description": "Intelligent Navigation & Safety — AI-powered sea-ice monitoring, iceberg trajectory forecasting, environmental risk assessment, and navigation decision support for Antarctic operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
