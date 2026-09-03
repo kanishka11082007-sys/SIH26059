@@ -406,12 +406,12 @@ class PolarRoutingEngine:
             else:
                 nx, ny = n1x, n1y
 
-            # Mode-dependent lateral safety offset
-            base_offset_m = min(d_m * 0.06, 25000.0)
+            # Mode-dependent lateral safety offset (proportional to distance up to 135 km)
+            base_offset_m = min(d_m * 0.09, 135000.0)
             if mode == "SAFEST":
                 offset_m = base_offset_m * 1.0
             elif mode == "BALANCED":
-                offset_m = base_offset_m * 0.45
+                offset_m = base_offset_m * 0.48
             else:
                 offset_m = 0.0
 

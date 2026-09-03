@@ -25,24 +25,38 @@ import { useFleet, CANONICAL_FLEET } from '../../context/FleetContext';
 // MapTiler API Key (optional)
 const MAPTILER_API_KEY = import.meta.env.VITE_MAPTILER_API_KEY || '';
 
-// High-contrast Polar Dark Matter Base Style
+// High-contrast Polar Dark Matter Nautical Base Style (CartoDB Dark)
 const DARK_MATTER_STYLE: StyleSpecification = {
   version: 8,
   sources: {
-    'osm-raster': {
+    'carto-dark': {
       type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tiles: [
+        'https://a.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png',
+        'https://b.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png',
+        'https://c.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png',
+        'https://d.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png'
+      ],
       tileSize: 256,
-      attribution: '© OpenStreetMap contributors'
+      attribution: '© CARTO © OpenStreetMap'
     }
   },
-  layers: [{
-    id: 'osm-base',
-    type: 'raster',
-    source: 'osm-raster',
-    minzoom: 0,
-    maxzoom: 19
-  }]
+  layers: [
+    {
+      id: 'background',
+      type: 'background',
+      paint: {
+        'background-color': '#060d17'
+      }
+    },
+    {
+      id: 'carto-base',
+      type: 'raster',
+      source: 'carto-dark',
+      minzoom: 0,
+      maxzoom: 19
+    }
+  ]
 };
 
 // Standard Operational Sectors
@@ -1216,22 +1230,20 @@ export const PolarMap: React.FC<PolarMapProps> = ({
         const isActive = wp.status === 'active';
         const isPassed = wp.status === 'passed';
         const wpColor = isActive ? '#00F2FE' : isPassed ? '#64748B' : '#10B981';
-        const dotSize = isActive ? 10 : 7;
+        const dotSize = isActive ? 8 : 6;
 
         wpEl.className = 'waypoint-marker-root';
-        wpEl.style.width = '20px';
-        wpEl.style.height = '20px';
+        wpEl.title = `Waypoint ${idx + 1} (${wpLat.toFixed(2)}°S, ${wpLon.toFixed(2)}°E)`;
+        wpEl.style.width = '14px';
+        wpEl.style.height = '14px';
         wpEl.style.display = 'flex';
-        wpEl.style.flexDirection = 'column';
         wpEl.style.alignItems = 'center';
         wpEl.style.justifyContent = 'center';
         wpEl.style.cursor = 'pointer';
 
         wpEl.innerHTML = `
-          <div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${wpColor};border:1.5px solid #FFFFFF;box-shadow:0 0 8px ${wpColor};flex-shrink:0;"></div>
-          <span style="margin-top:2px;font-family:monospace;font-size:7px;font-weight:bold;color:${wpColor};background:#040B16;padding:1px 3px;border-radius:2px;border:1px solid ${wpColor}44;white-space:nowrap;pointer-events:none;">
-            WP-${idx+1}
-          </span>`;
+          <div style="width:${dotSize}px;height:${dotSize}px;border-radius:50%;background:${wpColor};border:1.5px solid #FFFFFF;box-shadow:0 0 6px ${wpColor};transition:all 0.2s ease;"></div>
+        `;
 
         const marker = new MapLibreMarker({ element: wpEl, anchor: 'center' })
           .setLngLat([wpLon, wpLat])
