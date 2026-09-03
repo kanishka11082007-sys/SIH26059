@@ -7,7 +7,17 @@ import json
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+try:
+    from dotenv import load_dotenv
+    _cwd = Path(__file__).resolve().parent
+    for _env_f in [_cwd.parent.parent / ".env", _cwd.parent / ".env"]:
+        if _env_f.exists():
+            load_dotenv(_env_f)
+except ImportError:
+    pass
 
 from sqlalchemy import (
     Boolean,

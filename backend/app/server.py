@@ -17,6 +17,14 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 try:
+    from dotenv import load_dotenv
+    for _env_file in [ROOT_DIR / ".env", BACKEND_DIR / ".env"]:
+        if _env_file.exists():
+            load_dotenv(_env_file)
+except ImportError:
+    pass
+
+try:
     from backend.app.data_transformer import (
         _load_json,
         get_alerts,
