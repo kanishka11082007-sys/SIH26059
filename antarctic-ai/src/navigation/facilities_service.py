@@ -8,9 +8,8 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-logger = logging.getLogger("polarnav.facilities")
-
-FACILITIES_PATH = Path(r"D:/SIH/antarctic-ai/data/processed/verification/comnap_antarctic_facilities.json")
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+FACILITIES_PATH = BASE_DIR / "data" / "processed" / "verification" / "comnap_antarctic_facilities.json"
 
 
 class AntarcticFacilitiesService:

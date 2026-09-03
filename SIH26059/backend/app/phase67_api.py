@@ -12,8 +12,8 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-# Add antarctic-ai to path for imports
-sys.path.insert(0, str(Path(r"D:/SIH/antarctic-ai")))
+ROOT_DIR = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT_DIR / "antarctic-ai"))
 
 from src.optimization.route_optimizer import (
     generate_candidate_routes, generate_baseline_route, compare_routes
@@ -25,7 +25,7 @@ from src.optimization.cost_function import DEFAULT_WEIGHTS
 
 logger = logging.getLogger("polarnav.phase67_api")
 
-ANTARCTIC_DATA = Path(r"D:/SIH/antarctic-ai/data/processed/verification")
+ANTARCTIC_DATA = ROOT_DIR / "antarctic-ai" / "data" / "processed" / "verification"
 
 
 def _load(fn):

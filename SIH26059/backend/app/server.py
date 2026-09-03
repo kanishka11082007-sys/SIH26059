@@ -147,8 +147,8 @@ def api_antarctic_station_detail(station_id: str):
 @app.get("/api/antarctic/land-mask")
 def api_antarctic_land_mask():
     """GeoJSON Feature of Antarctic Land Polygon Mask (EPSG:4326)."""
-    land_path = "D:/SIH/antarctic-ai/data/raw/antarctica_land_mask.geojson"
-    if os.path.exists(land_path):
+    land_path = ROOT_DIR / "antarctic-ai" / "data" / "raw" / "antarctica_land_mask.geojson"
+    if land_path.exists():
         with open(land_path, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"type": "FeatureCollection", "features": []}
@@ -425,7 +425,8 @@ def api_historical_vessels():
 @app.get("/api/sentinel/scenes")
 def api_sentinel_scenes():
     """List available Sentinel-1 SAR GeoTIFF scenes."""
-    s1_files = sorted(glob.glob("D:/SIH/antarctic-ai/data/raw/sentinel/real_s1_scenes/*.tif"))
+    s1_pattern = str(ROOT_DIR / "antarctic-ai" / "data" / "raw" / "sentinel" / "real_s1_scenes" / "*.tif")
+    s1_files = sorted(glob.glob(s1_pattern))
     scenes = []
     for fp in s1_files:
         p = Path(fp)
@@ -446,7 +447,8 @@ def api_sentinel_detections(scene_idx: int = 0):
     """Run real-time SAR iceberg detection on selected Sentinel-1 scene."""
     try:
         from src.sentinel.predict import detect_sar_icebergs
-        s1_files = sorted(glob.glob("D:/SIH/antarctic-ai/data/raw/sentinel/real_s1_scenes/*.tif"))
+        s1_pattern = str(ROOT_DIR / "antarctic-ai" / "data" / "raw" / "sentinel" / "real_s1_scenes" / "*.tif")
+        s1_files = sorted(glob.glob(s1_pattern))
         if not s1_files:
             return {"error": "No Sentinel-1 scenes found"}
         idx = min(max(scene_idx, 0), len(s1_files) - 1)
@@ -458,8 +460,8 @@ def api_sentinel_detections(scene_idx: int = 0):
 @app.get("/api/sentinel/metrics")
 def api_sentinel_metrics():
     """Get Sentinel-1 ML model evaluation metrics."""
-    p = "D:/SIH/antarctic-ai/models/sentinel_feature_config.json"
-    if os.path.exists(p):
+    p = ROOT_DIR / "antarctic-ai" / "models" / "sentinel_feature_config.json"
+    if p.exists():
         with open(p, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"status": "Model not trained"}
@@ -535,7 +537,7 @@ def api_environment_status():
 @app.get("/api/intelligence/models")
 def api_intelligence_models():
     """Returns authentic evaluation benchmarks and architecture for all trained AI/ML modules."""
-    models_dir = Path("D:/SIH/antarctic-ai/models")
+    models_dir = ROOT_DIR / "antarctic-ai" / "models"
 
     sic_metrics = {}
     if (models_dir / "sea_ice_metrics.json").exists():

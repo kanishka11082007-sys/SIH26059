@@ -3,7 +3,8 @@ import math
 import time
 from pathlib import Path
 
-ANTARCTIC_DATA = Path(r"D:/SIH/antarctic-ai/data/processed/verification")
+ROOT_DIR = Path(__file__).resolve().parents[3]
+ANTARCTIC_DATA = ROOT_DIR / "antarctic-ai" / "data" / "processed" / "verification"
 
 def _load_json(fn):
     fp = ANTARCTIC_DATA / fn
@@ -560,7 +561,7 @@ def _generate_vessel_corridors(vessel):
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(r"D:/SIH/antarctic-ai")))
+sys.path.insert(0, str(ROOT_DIR / "antarctic-ai"))
 
 from src.optimization.polar_routing_engine import routing_engine
 from src.navigation.facilities_service import facilities_service
