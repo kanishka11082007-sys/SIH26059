@@ -11,6 +11,8 @@ from typing import Dict, List, Optional, Any
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 FACILITIES_PATH = BASE_DIR / "data" / "processed" / "verification" / "comnap_antarctic_facilities.json"
 
+logger = logging.getLogger("polarnav.facilities")
+
 
 class AntarcticFacilitiesService:
     def __init__(self):

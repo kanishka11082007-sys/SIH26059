@@ -29,6 +29,8 @@ from src.data.weather_service import weather_service
 from src.data.real_sic_service import real_sic_service
 from src.optimization.fuel_model import fuel_engine
 
+logger = logging.getLogger("polarnav.routing_engine")
+
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 PROCESSED_DIR = DATA_DIR / "processed" / "verification"
 RAW_DIR = DATA_DIR / "raw"
