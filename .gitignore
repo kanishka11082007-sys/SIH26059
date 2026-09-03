@@ -79,3 +79,7 @@ desktop.ini
 .idea/
 *.swp
 *.swo
+
+# 8. Local Presentation & Private Pitch Deck (Excluded from Git)
+sih_presentation/
+sih_ppt/
