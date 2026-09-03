@@ -11,8 +11,9 @@ import sys
 from pathlib import Path
 
 # Path setup
-sys.path.insert(0, r"D:/SIH/SIH26059")
-sys.path.insert(0, r"D:/SIH/antarctic-ai")
+ROOT_DIR = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT_DIR / "SIH26059"))
+sys.path.insert(0, str(ROOT_DIR / "antarctic-ai"))
 
 from backend.app.data_transformer import (
     _load_json,

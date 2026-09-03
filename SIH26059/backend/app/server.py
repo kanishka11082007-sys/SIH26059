@@ -5,10 +5,11 @@ import sys
 import time
 from pathlib import Path
 
-# Configure path resolutions for multi-package integration
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-sys.path.insert(0, r"D:/SIH/antarctic-ai")
-sys.path.insert(0, r"D:/SIH/SIH26059")
+# Configure dynamic path resolutions for multi-package integration
+ROOT_DIR = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT_DIR / "SIH26059"))
+sys.path.insert(0, str(ROOT_DIR / "antarctic-ai"))
+sys.path.insert(0, str(ROOT_DIR))
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,7 +47,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ANTARCTIC_DATA_DIR = "D:/SIH/antarctic-ai/data/processed/verification"
+ANTARCTIC_DATA_DIR = str(ROOT_DIR / "antarctic-ai" / "data" / "processed" / "verification")
 
 
 # =============================================================================
