@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { 
   Map as MapIcon, Navigation2, ThermometerSnowflake, 
   Target, Route as RouteIcon, CloudRainWind, 
-  History, AlertTriangle, FileText, Settings, ShieldAlert
+  History, AlertTriangle, FileText, Settings
 } from 'lucide-react';
 import PolarMap from '../components/map/PolarMap';
 import IntelligencePanel from '../components/IntelligencePanel';
@@ -95,27 +95,7 @@ const Dashboard = () => {
               showRouteOptimization={showRouteOptimization}
             />
             
-            {/* Contextual Alert Overlay (Simulation) */}
-            {selectedIcebergId === 'A-17' && (
-              <div className="absolute top-4 left-4 z-[400] bg-navy/95 border border-risk-high p-4 rounded-sm shadow-xl max-w-sm backdrop-blur-md animate-in fade-in slide-in-from-top-4">
-                <div className="flex items-start gap-3">
-                  <ShieldAlert className="w-6 h-6 text-risk-high shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="font-bold text-risk-high mb-1 text-sm">NAVIGATION ALERT</h4>
-                    <p className="text-xs text-ice-white mb-2 leading-relaxed">
-                      ICEBERG A-17 projected trajectory intersects recommended route within <span className="font-mono bg-risk-high/20 px-1">18.6 HOURS</span>.
-                    </p>
-                    <div className="text-xs font-mono mb-3">RISK: <span className="text-risk-high font-bold">HIGH</span></div>
-                    <button 
-                      onClick={() => setShowRouteOptimization(true)}
-                      className="text-xs font-semibold bg-risk-high/10 text-risk-high hover:bg-risk-high hover:text-white px-3 py-1.5 rounded-sm transition-colors border border-risk-high/30"
-                    >
-                      CONSIDER ROUTE B
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
+
 
             {/* Time Machine / Timeline */}
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[400] bg-navy/90 backdrop-blur-md border border-slate/30 px-6 py-3 rounded-full flex items-center gap-4 shadow-xl">

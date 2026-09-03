@@ -67,7 +67,7 @@ docker compose up --build
 #### 1. Backend Setup
 ```powershell
 # Set Python path
-$env:PYTHONPATH="D:\SIH\SIH26059;D:\SIH\antarctic-ai"
+$env:PYTHONPATH="D:\SIH;D:\SIH\backend;D:\SIH\backend\src"
 
 # Install dependencies
 pip install -r requirements.txt
@@ -77,6 +77,16 @@ python -m backend.app.seed_db
 
 # Run FastAPI server
 python -m uvicorn backend.app.server:app --host 0.0.0.0 --port 8000 --reload
+```
+
+#### Build & Push Backend with Docker:
+```bash
+# Build backend image directly using the unified backend directory
+docker build -t polarnav-backend ./backend
+
+# Tag and push to your container registry (Docker Hub / GHCR)
+docker tag polarnav-backend yourusername/polarnav-backend:latest
+docker push yourusername/polarnav-backend:latest
 ```
 
 #### 2. Frontend Setup

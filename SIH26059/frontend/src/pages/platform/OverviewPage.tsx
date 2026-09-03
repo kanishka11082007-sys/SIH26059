@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   ShieldAlert, 
-  Layers, 
   Ship, 
   CheckCircle2, 
   ArrowRight
@@ -14,7 +13,7 @@ import { useFleet } from '../../context/FleetContext';
 import { cn } from '../../utils/cn';
 
 export const OverviewPage: React.FC = () => {
-  const [layers, setLayers] = useState({
+  const [layers] = useState({
     vessel: true,
     route: true,
     seaIce: true,
@@ -36,11 +35,6 @@ export const OverviewPage: React.FC = () => {
     setSelectedIcebergId
   } = useFleet();
 
-  const [showLayerMenu, setShowLayerMenu] = useState(false);
-
-  const toggleLayer = (layerName: keyof typeof layers) => {
-    setLayers(prev => ({ ...prev, [layerName]: !prev[layerName] }));
-  };
 
   const currentRoute = activeRoute || routes[0] || {
     id: 'route-b',
@@ -55,48 +49,22 @@ export const OverviewPage: React.FC = () => {
       title="Overview"
       subtitle="Antarctic Operational Monitoring & Situational Awareness"
       actions={
-        <div className="flex items-center gap-2">
-          {/* Layer toggle dropdown */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowLayerMenu(!showLayerMenu)}
-              className="flex items-center gap-1.5 px-3 py-1 bg-polar-navy/40 hover:bg-polar-navy border border-slate/20 text-xs font-mono rounded-sm text-slate-300 hover:text-white transition-colors"
-            >
-              <Layers className="w-3.5 h-3.5 text-glacial-blue" />
-              <span>Layers</span>
-            </button>
-            {showLayerMenu && (
-              <div 
-                className="absolute right-0 mt-2 w-48 bg-navy/95 border border-slate/30 rounded-sm shadow-2xl p-2 z-50 backdrop-blur-xl font-mono text-xs space-y-1"
-                onMouseLeave={() => setShowLayerMenu(false)}
-              >
-                <div className="text-[10px] text-glacial-blue font-semibold px-2 py-1 uppercase border-b border-slate/20">Map Overlays</div>
-                <label className="flex items-center gap-2 px-2 py-1 hover:bg-polar-navy/50 rounded-sm cursor-pointer">
-                  <input type="checkbox" checked={layers.seaIce} onChange={() => toggleLayer('seaIce')} className="rounded border-slate/40 text-glacial-blue focus:ring-0" />
-                  <span>Sea Ice Bands</span>
-                </label>
-                <label className="flex items-center gap-2 px-2 py-1 hover:bg-polar-navy/50 rounded-sm cursor-pointer">
-                  <input type="checkbox" checked={layers.icebergs} onChange={() => toggleLayer('icebergs')} className="rounded border-slate/40 text-glacial-blue focus:ring-0" />
-                  <span>Icebergs</span>
-                </label>
-                <label className="flex items-center gap-2 px-2 py-1 hover:bg-polar-navy/50 rounded-sm cursor-pointer">
-                  <input type="checkbox" checked={layers.route} onChange={() => toggleLayer('route')} className="rounded border-slate/40 text-glacial-blue focus:ring-0" />
-                  <span>Navigation Route</span>
-                </label>
-                <label className="flex items-center gap-2 px-2 py-1 hover:bg-polar-navy/50 rounded-sm cursor-pointer">
-                  <input type="checkbox" checked={layers.vessel} onChange={() => toggleLayer('vessel')} className="rounded border-slate/40 text-glacial-blue focus:ring-0" />
-                  <span>Fleet Vessels</span>
-                </label>
-              </div>
-            )}
+        <div className="flex items-center gap-2.5 font-mono text-xs">
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-polar-navy/40 border border-slate/20 rounded-sm text-slate-300">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-slate-400">TELEMETRY:</span>
+            <span className="text-ice-white font-semibold">LIVE</span>
           </div>
-
+          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-polar-navy/40 border border-slate/20 rounded-sm text-slate-300">
+            <ShieldAlert className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="text-slate-400">POLARIS:</span>
+            <span className="text-emerald-400 font-semibold">{currentRoute.rioScore || '+8.4'} SAFE</span>
+          </div>
           <Link
             to="/navigation"
-            className="flex items-center gap-1.5 bg-gradient-to-r from-signature-coral to-deep-coral hover:from-soft-coral hover:to-signature-coral text-white px-3 py-1 rounded-sm text-xs font-mono font-bold tracking-wider uppercase transition-all shadow-sm"
+            className="flex items-center gap-1.5 bg-gradient-to-r from-signature-coral to-deep-coral hover:from-soft-coral hover:to-signature-coral text-white px-3.5 py-1 rounded-sm text-xs font-mono font-bold tracking-wider uppercase transition-all shadow-sm"
           >
-            <span>Navigation</span>
+            <span>Plan Voyage</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>

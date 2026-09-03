@@ -1,13 +1,25 @@
 # =============================================================================
-# PolarNav (SIH26059) Backend Production Dockerfile (Render / Railway / Cloud)
-# Automatically detected by Render, Railway, and Cloud platforms
+# PolarNav (SIH26059) Production Multi-Stage Full-Stack Dockerfile
+# Automatically builds React Frontend + FastAPI Backend into 1 deployable image
+# Compatible with: Render, Railway, Fly.io, AWS App Runner, Docker Hub, GCP Cloud Run
 # =============================================================================
 
-FROM python:3.11-slim
+# --- Stage 1: Build React Frontend ---
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+
+COPY SIH26059/frontend/package*.json ./
+RUN npm ci || npm install
+
+COPY SIH26059/frontend/ ./
+RUN npm run build
+
+# --- Stage 2: Production Python Backend & AI Engine ---
+FROM python:3.11-slim AS production
 
 WORKDIR /app
 
-# Install system dependencies for geospatial/GIS libraries
+# Install system dependencies for geospatial/GIS libraries & healthcheck curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
@@ -16,16 +28,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python production dependencies
-COPY requirements.txt .
+# Install Python dependencies
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy both backend modules: AI Engine & Platform Services
-COPY antarctic-ai/ /app/antarctic-ai/
-COPY SIH26059/backend/ /app/SIH26059/backend/
+# Copy backend application, AI engine, trained models, configurations, and data
+COPY backend/ /app/backend/
 
-# Configure Python search path across both packages
-ENV PYTHONPATH="/app/SIH26059:/app/antarctic-ai"
+# Copy compiled frontend SPA from Stage 1 into backend static directory
+COPY --from=frontend-builder /app/frontend/dist /app/backend/dist
+COPY --from=frontend-builder /app/frontend/dist /app/dist
+
+# Configure Python search paths and default runtime variables
+ENV PYTHONPATH="/app:/app/backend:/app/backend/src"
 ENV PORT=8000
 ENV HOST=0.0.0.0
 
@@ -34,4 +49,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-CMD ["python", "-m", "uvicorn", "backend.app.server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Launch FastAPI server (reads $PORT dynamically from environment)
+CMD ["python", "-m", "backend.app.server"]

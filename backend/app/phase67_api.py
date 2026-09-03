@@ -12,8 +12,11 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-ROOT_DIR = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT_DIR / "antarctic-ai"))
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = BACKEND_DIR.parent
+for _p in [str(BACKEND_DIR), str(BACKEND_DIR / "src")]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from src.optimization.route_optimizer import (
     generate_candidate_routes, generate_baseline_route, compare_routes
@@ -25,7 +28,7 @@ from src.optimization.cost_function import DEFAULT_WEIGHTS
 
 logger = logging.getLogger("polarnav.phase67_api")
 
-ANTARCTIC_DATA = ROOT_DIR / "antarctic-ai" / "data" / "processed" / "verification"
+ANTARCTIC_DATA = BACKEND_DIR / "data" / "processed" / "verification"
 
 
 def _load(fn):

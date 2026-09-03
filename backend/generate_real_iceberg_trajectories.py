@@ -12,8 +12,8 @@ from pathlib import Path
 from src.iceberg.load import load_iceberg_track, DATA_DIR
 from src.iceberg.predict import load_model, predict_trajectory
 
-BASE_DIR = Path("D:/SIH")
-PROCESSED_DIR = BASE_DIR / "antarctic-ai" / "data" / "processed" / "verification"
+BASE_DIR = Path(__file__).resolve().parent
+PROCESSED_DIR = BASE_DIR / "data" / "processed" / "verification"
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
 def haversine_km(lat1, lon1, lat2, lon2):

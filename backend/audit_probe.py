@@ -1,5 +1,8 @@
 import sys, os
-sys.path.insert(0, 'D:/SIH/antarctic-ai')
+from pathlib import Path
+BACKEND_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BACKEND_DIR))
+sys.path.insert(0, str(BACKEND_DIR / "src"))
 import xarray as xr
 import pandas as pd
 import numpy as np
@@ -7,7 +10,7 @@ import numpy as np
 print('=== 1. TEST SEA-ICE PREDICTION ===')
 from src.sea_ice.predict import load_model as load_sic_m, predict_grid, compute_risk_layer
 model_sic, cfg_sic = load_sic_m()
-ds_sic = xr.open_dataset('D:/SIH/antarctic-ai/data/raw/sea_ice/spatial_sic_monthly.nc')
+ds_sic = xr.open_dataset(str(BACKEND_DIR / 'data' / 'raw' / 'sea_ice' / 'spatial_sic_monthly.nc'))
 pred_grid = predict_grid(model_sic, ds_sic, time_idx=-1)
 print('Single Grid Predict: Shape =', pred_grid['sic_forecast'].shape, 'Min =', float(pred_grid['sic_forecast'].min()), 'Max =', float(pred_grid['sic_forecast'].max()))
 risk_ds = compute_risk_layer(pred_grid)
@@ -32,7 +35,7 @@ for _, row in traj.iterrows():
 
 print('\n=== 3. TEST DECISION ENGINE ROUTING ===')
 from src.optimization.decision_engine import execute_navigation_decision, NavigationRequest
-risk_grid_ds = xr.open_dataset('D:/SIH/antarctic-ai/data/processed/navigation_risk_grid.nc')
+risk_grid_ds = xr.open_dataset(str(BACKEND_DIR / 'data' / 'processed' / 'navigation_risk_grid.nc'))
 req = NavigationRequest(
     vessel_id='AAD-2015-16', vessel_name='Aurora Australis',
     start_lat=-65.0, start_lon=-64.0, dest_lat=-68.0, dest_lon=-70.0,
@@ -76,5 +79,4 @@ print(f'Iceberg Random Forest Metrics (N={len(y_ib):,}):')
 print(f'  MAE Lat: {mae_lat:.4f} deg, MAE Lon: {mae_lon:.4f} deg')
 print(f'  RMSE Lat: {rmse_lat:.4f} deg, RMSE Lon: {rmse_lon:.4f} deg')
 
-if os.path.exists('D:/SIH/antarctic-ai/audit_probe.py'):
-    os.remove('D:/SIH/antarctic-ai/audit_probe.py')
+print('Probe completed successfully.')

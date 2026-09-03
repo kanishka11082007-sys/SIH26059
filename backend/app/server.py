@@ -5,32 +5,54 @@ import sys
 import time
 from pathlib import Path
 
-# Configure dynamic path resolutions for multi-package integration
-ROOT_DIR = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT_DIR / "SIH26059"))
-sys.path.insert(0, str(ROOT_DIR / "antarctic-ai"))
-sys.path.insert(0, str(ROOT_DIR))
+# Configure dynamic path resolutions for unified backend & AI navigation engine
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = BACKEND_DIR.parent
+
+for _p in [str(BACKEND_DIR), str(BACKEND_DIR / "src"), str(ROOT_DIR)]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.data_transformer import (
-    _load_json,
-    get_alerts,
-    get_environmental,
-    get_icebergs,
-    get_metrics,
-    get_reports,
-    get_risk_grid,
-    get_routes,
-    get_sea_ice_sectors,
-    get_sic_grid,
-    get_sic_timesteps,
-    get_vessels,
-    get_waypoints,
-)
-from backend.app.phase67_api import run_optimization
-from backend.services.ais_service import backend_ais_service
+try:
+    from backend.app.data_transformer import (
+        _load_json,
+        get_alerts,
+        get_environmental,
+        get_icebergs,
+        get_metrics,
+        get_reports,
+        get_risk_grid,
+        get_routes,
+        get_sea_ice_sectors,
+        get_sic_grid,
+        get_sic_timesteps,
+        get_vessels,
+        get_waypoints,
+    )
+    from backend.app.phase67_api import run_optimization
+    from backend.services.ais_service import backend_ais_service
+except ImportError:
+    from app.data_transformer import (
+        _load_json,
+        get_alerts,
+        get_environmental,
+        get_icebergs,
+        get_metrics,
+        get_reports,
+        get_risk_grid,
+        get_routes,
+        get_sea_ice_sectors,
+        get_sic_grid,
+        get_sic_timesteps,
+        get_vessels,
+        get_waypoints,
+    )
+    from app.phase67_api import run_optimization
+    from services.ais_service import backend_ais_service
+
 from src.navigation.facilities_service import facilities_service
 
 app = FastAPI(
@@ -47,7 +69,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ANTARCTIC_DATA_DIR = str(ROOT_DIR / "antarctic-ai" / "data" / "processed" / "verification")
+ANTARCTIC_DATA_DIR = str(BACKEND_DIR / "data" / "processed" / "verification")
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -166,7 +188,7 @@ def api_antarctic_station_detail(station_id: str):
 @app.get("/api/antarctic/land-mask")
 def api_antarctic_land_mask():
     """GeoJSON Feature of Antarctic Land Polygon Mask (EPSG:4326)."""
-    land_path = ROOT_DIR / "antarctic-ai" / "data" / "raw" / "antarctica_land_mask.geojson"
+    land_path = BACKEND_DIR / "data" / "raw" / "antarctica_land_mask.geojson"
     if land_path.exists():
         with open(land_path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -444,7 +466,7 @@ def api_historical_vessels():
 @app.get("/api/sentinel/scenes")
 def api_sentinel_scenes():
     """List available Sentinel-1 SAR GeoTIFF scenes."""
-    s1_pattern = str(ROOT_DIR / "antarctic-ai" / "data" / "raw" / "sentinel" / "real_s1_scenes" / "*.tif")
+    s1_pattern = str(BACKEND_DIR / "data" / "raw" / "sentinel" / "real_s1_scenes" / "*.tif")
     s1_files = sorted(glob.glob(s1_pattern))
     scenes = []
     for fp in s1_files:
@@ -466,7 +488,7 @@ def api_sentinel_detections(scene_idx: int = 0):
     """Run real-time SAR iceberg detection on selected Sentinel-1 scene."""
     try:
         from src.sentinel.predict import detect_sar_icebergs
-        s1_pattern = str(ROOT_DIR / "antarctic-ai" / "data" / "raw" / "sentinel" / "real_s1_scenes" / "*.tif")
+        s1_pattern = str(BACKEND_DIR / "data" / "raw" / "sentinel" / "real_s1_scenes" / "*.tif")
         s1_files = sorted(glob.glob(s1_pattern))
         if not s1_files:
             return {"error": "No Sentinel-1 scenes found"}
@@ -479,7 +501,7 @@ def api_sentinel_detections(scene_idx: int = 0):
 @app.get("/api/sentinel/metrics")
 def api_sentinel_metrics():
     """Get Sentinel-1 ML model evaluation metrics."""
-    p = ROOT_DIR / "antarctic-ai" / "models" / "sentinel_feature_config.json"
+    p = BACKEND_DIR / "models" / "sentinel_feature_config.json"
     if p.exists():
         with open(p, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -556,7 +578,7 @@ def api_environment_status():
 @app.get("/api/intelligence/models")
 def api_intelligence_models():
     """Returns authentic evaluation benchmarks and architecture for all trained AI/ML modules."""
-    models_dir = ROOT_DIR / "antarctic-ai" / "models"
+    models_dir = BACKEND_DIR / "models"
 
     sic_metrics = {}
     if (models_dir / "sea_ice_metrics.json").exists():
@@ -708,8 +730,22 @@ def api_db_status():
     return check_db_connection()
 
 
-# Optional Monolithic Single-Port Static Serving (for unified single-container cloud deployment)
-FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-if FRONTEND_DIST.exists():
-    from fastapi.staticfiles import StaticFiles
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend_spa")
+# Monolithic Single-Port Static Serving (for unified single-container cloud deployment)
+for _dist_path in [
+    BACKEND_DIR / "dist",
+    ROOT_DIR / "dist",
+    ROOT_DIR / "frontend" / "dist",
+    ROOT_DIR / "SIH26059" / "frontend" / "dist",
+]:
+    if _dist_path.exists() and (_dist_path / "index.html").exists():
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=str(_dist_path), html=True), name="frontend_spa")
+        break
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "0.0.0.0")
+    app_target = "app.server:app" if Path("app/server.py").exists() else "backend.app.server:app"
+    uvicorn.run(app_target, host=host, port=port)

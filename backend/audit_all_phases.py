@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-BASE_DIR = Path("D:/SIH")
-AI_DIR = BASE_DIR / "antarctic-ai"
-BACKEND_DIR = BASE_DIR / "SIH26059" / "backend"
+BACKEND_DIR = Path(__file__).resolve().parent
+BASE_DIR = BACKEND_DIR.parent
+AI_DIR = BACKEND_DIR
 FRONTEND_DIR = BASE_DIR / "SIH26059" / "frontend"
 
 def audit_datasets():

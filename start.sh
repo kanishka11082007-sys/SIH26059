@@ -5,7 +5,7 @@ echo "================================================================"
 echo " POLARNAV (SIH26059) - Antarctic AI Navigation System"
 echo "================================================================"
 
-export PYTHONPATH="$(pwd)/SIH26059:$(pwd)/antarctic-ai:$PYTHONPATH"
+export PYTHONPATH="$(pwd):$(pwd)/backend:$(pwd)/backend/src:$PYTHONPATH"
 
 if [ ! -f .env ]; then
     echo "[INFO] Creating .env from .env.example..."

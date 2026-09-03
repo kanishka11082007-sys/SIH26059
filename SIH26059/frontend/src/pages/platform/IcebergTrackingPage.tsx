@@ -69,12 +69,6 @@ export const IcebergTrackingPage: React.FC = () => {
     fetchIcebergs();
   }, [fetchIcebergs]);
 
-  // Auto-select primary target on initial load
-  useEffect(() => {
-    if (!selectedIcebergId && icebergs.length > 0) {
-      setSelectedIcebergId(icebergs[0].id);
-    }
-  }, [icebergs, selectedIcebergId]);
 
   // Compute live vessel-to-iceberg separation relative to active vessel
   const enrichedIcebergs = useMemo(() => {

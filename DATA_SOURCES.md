@@ -76,7 +76,7 @@ This document provides a comprehensive technical audit and provenance record for
 * **Spatial Coverage**: Southern Hemisphere Polar Stereographic grid (EPSG:3412 / EPSG:3031)
 * **Spatial Resolution**: 25 km nominal grid spacing
 * **Variables Extracted**: `cdr_seaice_conc_monthly` (fraction $0.0$ to $1.0$, converted to percentage $0$–$100\%$)
-* **Storage Location**: `antarctic-ai/data/raw/sea_ice/real_cdr_sic.nc`
+* **Storage Location**: `backend/data/raw/sea_ice/real_cdr_sic.nc`
 * **Consuming Modules**:
   - `src/data/real_sic_service.py` (KDTree spatial queries)
   - `src/optimization/polar_routing_engine.py` (Ice resistance calculation)
@@ -91,7 +91,7 @@ This document provides a comprehensive technical audit and provenance record for
 * **Temporal Coverage**: 1978 – Present (180+ authoritative CSV tracking trajectories)
 * **Spatial Coverage**: All Antarctic Quadrants (Weddell Sea, Ross Sea, Amery, Bellingshausen/Amundsen)
 * **Variables Extracted**: `Iceberg_ID`, `Latitude`, `Longitude`, `Date`, `Length_km`, `Width_km`, `Size_Class`
-* **Storage Location**: `antarctic-ai/data/raw/iceberg/consolidated/*.csv`
+* **Storage Location**: `backend/data/raw/iceberg/consolidated/*.csv`
 * **Consuming Modules**:
   - `src/models/iceberg_trajectory_model.joblib` (Random Forest trajectory forecasting)
   - `src/optimization/polar_routing_engine.py` (Closest Point of Approach CPA & collision avoidance)
@@ -106,7 +106,7 @@ This document provides a comprehensive technical audit and provenance record for
 * **Sensor / Mode**: C-band SAR (5.405 GHz), Extra Wide (EW) / Interferometric Wide (IW), HH Polarization
 * **Spatial Resolution**: 10 m – 40 m pixel resolution
 * **Scenes Available**: 15 calibrated GeoTIFF scenes over Antarctic coastal operational zones
-* **Storage Location**: `antarctic-ai/data/raw/sentinel/real_s1_scenes/*.tif`
+* **Storage Location**: `backend/data/raw/sentinel/real_s1_scenes/*.tif`
 * **Consuming Modules**:
   - `src/sentinel/train.py` (Radar feature extraction: Lee filter despeckling, mean, variance, GLCM texture)
   - `src/sentinel/predict.py` (Adaptive CFAR detection producing target bounding boxes and peak $\sigma^0$ dB)
@@ -125,7 +125,7 @@ This document provides a comprehensive technical audit and provenance record for
   - $v_o$: Northward sea water velocity (m/s)
   - Surface current speed ($V = \sqrt{u^2 + v^2}$ in knots)
   - Current flow bearing ($\theta = \text{atan2}(u, v)$ in degrees True)
-* **Storage Location**: `antarctic-ai/data/raw/ocean/copernicus_currents_real.nc`
+* **Storage Location**: `backend/data/raw/ocean/copernicus_currents_real.nc`
 * **Consuming Modules**:
   - `src/data/ocean_service.py` (Vector interpolation and vessel current assistance calculation)
   - `src/optimization/polar_routing_engine.py` (Advective drift and fuel optimization)
@@ -145,7 +145,7 @@ This document provides a comprehensive technical audit and provenance record for
 * **Caching & Fallback Strategy**:
   - Local disk cache (`data/processed/weather_cache.json`) with 6-hour TTL
   - In-memory dictionary memoization for sub-millisecond route evaluations
-  - Offline fallback to local ERA5 Reanalysis NetCDF (`antarctic-ai/data/raw/weather/era5_antarctic_real.nc`)
+  - Offline fallback to local ERA5 Reanalysis NetCDF (`backend/data/raw/weather/era5_antarctic_real.nc`)
 * **Consuming Modules**:
   - `src/data/weather_service.py`
   - `src/optimization/polar_routing_engine.py` (Aerodynamic drag and wave resistance)
@@ -160,7 +160,7 @@ This document provides a comprehensive technical audit and provenance record for
 * **Spatial Coverage**: Antarctic Peninsula and Weddell/Bransfield operational sectors ($60^\circ\text{S} - 75^\circ\text{S}$, $50^\circ\text{W} - 75^\circ\text{W}$)
 * **Spatial Resolution**: 1 arc-minute (~1.8 km)
 * **Variables Extracted**: `altitude` (positive = meters above sea level; negative = ocean depth in meters)
-* **Storage Location**: `antarctic-ai/data/raw/bathymetry/etopo_antarctic.nc`
+* **Storage Location**: `backend/data/raw/bathymetry/etopo_antarctic.nc`
 * **Consuming Modules**:
   - `src/data/bathymetry_service.py` (Depth lookups, shallow water hazard classification $< 20\text{m}$)
   - `src/optimization/polar_routing_engine.py` (Keel clearance penalties)
@@ -173,7 +173,7 @@ This document provides a comprehensive technical audit and provenance record for
 * **Provider / Agency**: COMNAP Secretariat & BAS Mapping and Geographic Information Centre (MAGIC)
 * **Facilities Documented**: 45 authoritative stations (e.g. Bharati, Maitri, Palmer, McMurdo, Rothera, Halley VI)
 * **Variables Extracted**: `id`, `name`, `operator_country`, `latitude`, `longitude`, `elevation_m`, `status_season`, `is_ship_accessible`
-* **Storage Location**: `antarctic-ai/data/raw/comnap_antarctic_facilities.json`
+* **Storage Location**: `backend/data/raw/comnap_antarctic_facilities.json`
 * **Consuming Modules**:
   - `src/navigation/facilities_service.py`
   - `backend/app/data_transformer.py` (`get_stations()`)
@@ -185,7 +185,7 @@ This document provides a comprehensive technical audit and provenance record for
 * **Dataset Name**: Scientific Committee on Antarctic Research (SCAR) Antarctic Digital Database (ADD) Coastline
 * **Provider / Agency**: SCAR / British Antarctic Survey
 * **Format**: High-precision GeoJSON MultiPolygon (ice shelf front and grounding line)
-* **Storage Location**: `antarctic-ai/data/raw/antarctica_land_mask.geojson`
+* **Storage Location**: `backend/data/raw/antarctica_land_mask.geojson`
 * **Consuming Modules**:
   - `src/optimization/polar_routing_engine.py` (Shapely `Point.within()` collision rejection)
   - `frontend/src/components/map/PolarMap.tsx` (Vector land boundary rendering)

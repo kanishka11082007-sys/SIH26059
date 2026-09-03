@@ -1,0 +1,21 @@
+# Python bytecode & virtual environments
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.Python
+
+# Version control & OS metadata
+.git/
+.gitignore
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Testing & Logs
+.pytest_cache/
+*.log

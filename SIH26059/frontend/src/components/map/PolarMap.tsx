@@ -430,16 +430,15 @@ export const PolarMap: React.FC<PolarMapProps> = ({
   // Active Vessel Selection: prioritize explicit prop or global FleetContext
   const currentVesselId = selectedVesselId || contextSelectedVesselId || 'rv_sagar_nidhi';
 
-  // Unified Hover Probe Card (for Icebergs, Sea Ice, Routes, Vessels)
-  const [probeData, setProbeData] = useState<{
-    type: 'ICEBERG' | 'SEA_ICE' | 'ROUTE' | 'VESSEL' | 'CURRENT';
+  // Click-only inspection card (only appears when an entity is explicitly clicked)
+  const [selectedEntityInfo, setSelectedEntityInfo] = useState<{
     title: string;
     badge: string;
     badgeColor: string;
     details: { label: string; value: string | number }[];
-    x: number;
-    y: number;
   } | null>(null);
+
+
 
   // Fetch COMNAP Antarctic facilities & Land Mask
   useEffect(() => {
@@ -642,8 +641,10 @@ export const PolarMap: React.FC<PolarMapProps> = ({
       trackResize: true
     });
 
-    map.on('dragstart', () => {
-      setProbeData(null);
+
+
+    map.on('click', () => {
+      setSelectedEntityInfo(null);
     });
 
     map.on('load', () => {
@@ -1175,11 +1176,7 @@ export const PolarMap: React.FC<PolarMapProps> = ({
           e.preventDefault();
           e.stopPropagation();
           handleVesselChange(v.id);
-        });
-
-        vesselEl.addEventListener('mouseenter', (e) => {
-          setProbeData({
-            type: 'VESSEL',
+          setSelectedEntityInfo({
             title: `${v.flag || '⚓'} ${v.name.replace(' — DEMO', '')}`,
             badge: isSelected ? 'ACTIVE VESSEL' : 'FLEET VESSEL',
             badgeColor: isSelected ? '#00F2FE' : '#94A3B8',
@@ -1188,17 +1185,13 @@ export const PolarMap: React.FC<PolarMapProps> = ({
               { label: 'Operator', value: v.operator ? v.operator.split(' (')[0] : (v.country || 'Polar Research') },
               { label: 'Speed & Heading', value: `${vSpeed} kn · ${vHeading}°T` },
               { label: 'Destination', value: v.destination || 'Antarctic Base' },
-              { label: 'ETA', value: v.eta || 'En Route' },
-              { label: 'Action', value: isSelected ? 'Currently Selected' : '👉 Click to select & frame route' }
-            ],
-            x: e.clientX,
-            y: e.clientY
+              { label: 'Coordinates', value: `${Math.abs(Number(v.latitude.toFixed(2)))}°S, ${Math.abs(Number(v.longitude.toFixed(2)))}°${v.longitude >= 0 ? 'E' : 'W'}` },
+              { label: 'ETA', value: v.eta || 'En Route' }
+            ]
           });
         });
 
-        vesselEl.addEventListener('mouseleave', () => {
-          setProbeData(null);
-        });
+        vesselEl.title = `${v.flag || '⚓'} ${v.name.replace(' — DEMO', '')} (${vSpeed} kn, ${vHeading}°T) — Click to select`;
 
         const marker = new MapLibreMarker({ element: vesselEl, anchor: 'center' })
           .setLngLat([v.longitude, v.latitude])
@@ -1440,11 +1433,7 @@ export const PolarMap: React.FC<PolarMapProps> = ({
         ibEl.addEventListener('click', (e) => {
           e.stopPropagation();
           handleIcebergSelect(ib.id);
-        });
-
-        ibEl.addEventListener('mouseenter', (e) => {
-          setProbeData({
-            type: 'ICEBERG',
+          setSelectedEntityInfo({
             title: `Iceberg ${ib.id} (${ib.name || 'Shelf Fragment'})`,
             badge: ib.risk || 'CAUTION',
             badgeColor: color,
@@ -1455,15 +1444,11 @@ export const PolarMap: React.FC<PolarMapProps> = ({
               { label: 'Confidence', value: `${ib.confidence || 94.8}%` },
               { label: 'Coordinates', value: `${Math.abs(Number(lat.toFixed(2)))}°S, ${Math.abs(Number(lon.toFixed(2)))}°${lon >= 0 ? 'E' : 'W'}` },
               { label: 'Sensor Source', value: ib.sensorSource || 'BYU/NIC Polar MERS Radar' }
-            ],
-            x: e.clientX,
-            y: e.clientY
+            ]
           });
         });
 
-        ibEl.addEventListener('mouseleave', () => {
-          setProbeData(null);
-        });
+        ibEl.title = `Iceberg ${ib.id} (${ib.name || 'Fragment'}) • ${area} km² • ${ib.risk || 'SAFE'} Risk — Click to select`;
 
         const marker = new MapLibreMarker({ element: ibEl, anchor: 'center' })
           .setLngLat([lon, lat])
@@ -1699,33 +1684,7 @@ export const PolarMap: React.FC<PolarMapProps> = ({
         )}
       </div>
 
-      {/* ========================================================================= */}
-      {/* 3. UNIFIED HOVER PROBE CARD                                               */}
-      {/* ========================================================================= */}
-      {probeData && (
-        <div 
-          className="absolute z-40 pointer-events-none bg-[#040B16]/95 backdrop-blur-md border border-cyan-400/80 rounded-xl p-3 shadow-[0_0_25px_rgba(0,242,254,0.35)] font-mono text-xs w-64 space-y-1.5 transition-all"
-          style={{
-            left: Math.min(window.innerWidth - 280, Math.max(20, probeData.x + 15)),
-            top: Math.min(window.innerHeight - 200, Math.max(20, probeData.y - 30))
-          }}
-        >
-          <div className="flex items-center justify-between border-b border-slate-800 pb-1">
-            <span className="text-[10px] text-cyan-400 font-bold">{probeData.title}</span>
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: probeData.badgeColor, backgroundColor: `${probeData.badgeColor}22` }}>
-              {probeData.badge}
-            </span>
-          </div>
-          <div className="space-y-1 text-[10px]">
-            {probeData.details.map((d, i) => (
-              <div key={i} className="flex items-center justify-between">
-                <span className="text-slate-400">{d.label}:</span>
-                <strong className="text-slate-200">{d.value}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+
 
       {/* ========================================================================= */}
       {/* 4. BOTTOM-LEFT COLLAPSIBLE MARITIME LEGEND                                 */}
@@ -1805,6 +1764,41 @@ export const PolarMap: React.FC<PolarMapProps> = ({
         )}
       </div>
 
+
+      {/* ========================================================================= */}
+      {/* 5. CLICK-ONLY DOCKED INFO CARD (DISMISSABLE WITH ✕ OR MAP CLICK)           */}
+      {/* ========================================================================= */}
+      {selectedEntityInfo && (
+        <div className="absolute bottom-4 right-4 z-30 bg-[#040B16]/95 backdrop-blur-md border border-cyan-500/60 rounded-xl p-3.5 shadow-2xl font-mono text-xs w-72 space-y-2 select-text animate-in fade-in slide-in-from-bottom-2">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+            <span className="text-[11px] text-cyan-300 font-bold truncate max-w-[170px]">{selectedEntityInfo.title}</span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: selectedEntityInfo.badgeColor, backgroundColor: `${selectedEntityInfo.badgeColor}22` }}>
+                {selectedEntityInfo.badge}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedEntityInfo(null);
+                }}
+                className="text-slate-400 hover:text-white p-0.5 rounded hover:bg-slate-800 transition-colors"
+                title="Close Card"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1 text-[10px]">
+            {selectedEntityInfo.details.map((d, i) => (
+              <div key={i} className="flex items-center justify-between">
+                <span className="text-slate-400">{d.label}:</span>
+                <strong className="text-slate-200">{d.value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
     </div>
   );

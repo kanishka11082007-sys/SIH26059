@@ -18,7 +18,7 @@ import xarray as xr
 from shapely.geometry import shape, Point
 from shapely.prepared import prep
 
-ROOT = Path(r"D:\SIH\antarctic-ai")
+ROOT = Path(__file__).resolve().parent
 PROCESSED_DIR = ROOT / "data" / "processed" / "verification"
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 

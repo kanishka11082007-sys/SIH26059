@@ -4,7 +4,7 @@ echo  POLARNAV (SIH26059) - Antarctic AI Navigation System
 echo ================================================================
 echo.
 
-set PYTHONPATH=D:\SIH\SIH26059;D:\SIH\antarctic-ai
+set PYTHONPATH=%~dp0;%~dp0backend;%~dp0backend\src
 
 echo [1/3] Checking environment configuration...
 if not exist .env (
