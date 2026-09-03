@@ -50,6 +50,25 @@ app.add_middleware(
 ANTARCTIC_DATA_DIR = str(ROOT_DIR / "antarctic-ai" / "data" / "processed" / "verification")
 
 
+@app.get("/")
+def root_index():
+    """Root entrypoint providing system status, documentation link, and core endpoint directory."""
+    return {
+        "service": "PolarNav Antarctic AI Navigation Decision Support System",
+        "problem_statement": "SIH26059",
+        "status": "ONLINE",
+        "documentation": "/docs",
+        "endpoints": {
+            "health": "/api/health",
+            "database_status": "/api/db/status",
+            "vessels": "/api/vessels",
+            "routes": "/api/routes",
+            "icebergs": "/api/icebergs",
+            "ai_models": "/api/intelligence/models"
+        }
+    }
+
+
 # =============================================================================
 # 1. POLAR FLEET & AIS ENDPOINTS
 # =============================================================================
