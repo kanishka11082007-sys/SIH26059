@@ -50,7 +50,7 @@ app.add_middleware(
 ANTARCTIC_DATA_DIR = str(ROOT_DIR / "antarctic-ai" / "data" / "processed" / "verification")
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root_index():
     """Root entrypoint providing system status, documentation link, and core endpoint directory."""
     return {
@@ -695,7 +695,7 @@ def api_bathymetry(lat: float = Query(-65.0), lon: float = Query(-64.0)):
 # 9. HEALTH & DIAGNOSTICS
 # =============================================================================
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def api_health():
     """System health check probe."""
     return {"status": "ok", "version": "1.0.0"}
