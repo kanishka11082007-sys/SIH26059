@@ -1,24 +1,13 @@
 # =============================================================================
-# PolarNav (SIH26059) Unified Production Dockerfile
-# Multi-stage build: Builds React frontend -> Serves via FastAPI + Uvicorn
+# PolarNav (SIH26059) Backend Production Dockerfile (Render / Railway / Cloud)
+# Automatically detected by Render, Railway, and Cloud platforms
 # =============================================================================
 
-# Stage 1: Build React Frontend
-FROM node:20-alpine AS frontend-builder
-WORKDIR /app/frontend
-
-COPY SIH26059/frontend/package*.json ./
-RUN npm ci
-
-COPY SIH26059/frontend/ ./
-RUN npm run build
-
-# Stage 2: Production Python Runtime
-FROM python:3.11-slim AS runtime
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies required for geospatial libraries
+# Install system dependencies for geospatial/GIS libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
@@ -31,21 +20,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend and AI engine code
+# Copy both backend modules: AI Engine & Platform Services
 COPY antarctic-ai/ /app/antarctic-ai/
-COPY SIH26059/ /app/SIH26059/
+COPY SIH26059/backend/ /app/SIH26059/backend/
 
-# Copy compiled frontend from Stage 1 into backend's static directory
-COPY --from=frontend-builder /app/frontend/dist /app/SIH26059/frontend/dist
-
-# Set Python path
+# Configure Python search path across both packages
 ENV PYTHONPATH="/app/SIH26059:/app/antarctic-ai"
 ENV PORT=8000
 ENV HOST=0.0.0.0
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
 CMD ["python", "-m", "uvicorn", "backend.app.server:app", "--host", "0.0.0.0", "--port", "8000"]
