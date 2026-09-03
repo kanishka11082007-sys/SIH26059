@@ -1,12 +1,29 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
+function getApiBase(): string {
+  const envUrl = (import.meta.env.VITE_API_BASE_URL as string || "").trim();
+  if (!envUrl) {
+    return "/api";
+  }
+  const clean = envUrl.replace(/\/+$/, "");
+  if (!clean.endsWith("/api")) {
+    return `${clean}/api`;
+  }
+  return clean;
+}
+
+const API_BASE = getApiBase();
 
 export async function apiFetch<T>(endpoint: string): Promise<T | null> {
   try {
-    const url = API_BASE + endpoint;
+    const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    const url = API_BASE + cleanEndpoint;
     const res = await fetch(url);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[PolarNav API] HTTP ${res.status} for ${url}`);
+      return null;
+    }
     return await res.json();
-  } catch {
+  } catch (err) {
+    console.warn(`[PolarNav API] Connection error for ${endpoint}:`, err);
     return null;
   }
 }
