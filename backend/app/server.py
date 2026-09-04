@@ -80,11 +80,12 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup_prewarm():
-    """Asynchronously pre-warm route calculation cache on startup for immediate responses."""
+    """Asynchronously pre-warm route and iceberg calculation caches on startup for immediate responses."""
     import threading
     def _warm():
         try:
-            from backend.app.data_transformer import get_routes
+            from backend.app.data_transformer import get_icebergs, get_routes
+            get_icebergs()
             get_routes()
         except Exception:
             pass

@@ -319,68 +319,78 @@ export function getDataVersion() { return dataVersion; }
 
 async function loadRealData() {
   try {
-    const [vesselsRes, icebergsRes, routesRes, _metricsRes, envRes, sectorsRes, wpRes, alertsRes, reportsRes] =
-      await Promise.all([
-        api.vessels(), api.icebergs(), api.routes(), api.metrics(),
-        api.environmental(), api.seaIceSectors(), api.waypoints(),
-        api.alerts(), api.reports(),
-      ]);
+    const tasks = [
+      api.vessels().then(vesselsRes => {
+        if (vesselsRes?.vessels?.length) {
+          const v = vesselsRes.vessels[0];
+          Object.assign(mockVessel, {
+            id: v.id, name: v.name, latitude: v.latitude, longitude: v.longitude,
+            heading: v.heading, speed: v.speed, destination: v.destination, eta: v.eta,
+          });
+          dataVersion++;
+        }
+      }).catch(() => {}),
 
-    const hasData = vesselsRes?.vessels?.length || icebergsRes?.icebergs?.length;
-    if (!hasData) return;
+      api.icebergs().then(icebergsRes => {
+        if (icebergsRes?.icebergs?.length) {
+          mockIcebergs.length = 0;
+          icebergsRes.icebergs.forEach((ib: any) => mockIcebergs.push(ib));
+          dataVersion++;
+        }
+      }).catch(() => {}),
 
-    // Replace vessel data
-    if (vesselsRes?.vessels?.length) {
-      const v = vesselsRes.vessels[0];
-      Object.assign(mockVessel, {
-        id: v.id, name: v.name, latitude: v.latitude, longitude: v.longitude,
-        heading: v.heading, speed: v.speed, destination: v.destination, eta: v.eta,
-      });
-    }
+      api.routes().then(routesRes => {
+        if (routesRes?.routes?.length) {
+          mockRoutes.length = 0;
+          routesRes.routes.forEach((r: any) => mockRoutes.push(r));
+          dataVersion++;
+        }
+      }).catch(() => {}),
 
-    // Replace icebergs
-    if (icebergsRes?.icebergs?.length) {
-      mockIcebergs.length = 0;
-      icebergsRes.icebergs.forEach((ib: any) => mockIcebergs.push(ib));
-    }
+      api.environmental().then(envRes => {
+        if (envRes) {
+          Object.assign(mockEnvironmental, envRes);
+          dataVersion++;
+        }
+      }).catch(() => {}),
 
-    // Replace routes
-    if (routesRes?.routes?.length) {
-      mockRoutes.length = 0;
-      routesRes.routes.forEach((r: any) => mockRoutes.push(r));
-    }
+      api.seaIceSectors().then(sectorsRes => {
+        if (sectorsRes?.sectors?.length) {
+          mockIceSectors.length = 0;
+          sectorsRes.sectors.forEach((s: any) => mockIceSectors.push(s));
+          dataVersion++;
+        }
+      }).catch(() => {}),
 
-    // Replace waypoints
-    if (wpRes?.waypoints?.length) {
-      mockWaypoints.length = 0;
-      wpRes.waypoints.forEach((w: any) => mockWaypoints.push(w));
-    }
+      api.waypoints().then(wpRes => {
+        if (wpRes?.waypoints?.length) {
+          mockWaypoints.length = 0;
+          wpRes.waypoints.forEach((w: any) => mockWaypoints.push(w));
+          dataVersion++;
+        }
+      }).catch(() => {}),
 
-    // Replace alerts
-    if (alertsRes?.alerts?.length) {
-      mockAlerts.length = 0;
-      alertsRes.alerts.forEach((a: any) => mockAlerts.push(a));
-    }
+      api.alerts().then(alertsRes => {
+        if (alertsRes?.alerts?.length) {
+          mockAlerts.length = 0;
+          alertsRes.alerts.forEach((a: any) => mockAlerts.push(a));
+          dataVersion++;
+        }
+      }).catch(() => {}),
 
-    // Replace sea ice sectors
-    if (sectorsRes?.sectors?.length) {
-      mockIceSectors.length = 0;
-      sectorsRes.sectors.forEach((s: any) => mockIceSectors.push(s));
-    }
+      api.reports().then(reportsRes => {
+        if (reportsRes?.reports?.length) {
+          mockReports.length = 0;
+          reportsRes.reports.forEach((r: any) => mockReports.push(r));
+          dataVersion++;
+        }
+      }).catch(() => {}),
 
-    // Replace reports
-    if (reportsRes?.reports?.length) {
-      mockReports.length = 0;
-      reportsRes.reports.forEach((r: any) => mockReports.push(r));
-    }
+      api.metrics().catch(() => {})
+    ];
 
-    // Replace environmental
-    if (envRes) {
-      Object.assign(mockEnvironmental, envRes);
-    }
-
-    dataVersion++;
-    console.log('[PolarNav] Real data loaded from backend API (v' + dataVersion + ')');
+    await Promise.allSettled(tasks);
+    console.log('[PolarNav] Real data streaming loaded from backend API (v' + dataVersion + ')');
   } catch (e) {
     console.log('[PolarNav] Backend unavailable, using mock data');
   }

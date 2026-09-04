@@ -291,41 +291,31 @@ def get_vessels():
     return vessels
 
 
-_ICEBERGS_CACHE = {}
+_MASTER_ICEBERGS_DATA = None
+_MASTER_ICEBERGS_TIMESTAMP = 0
 
 
-def get_icebergs(time_horizon=None):
-    """Get icebergs with optimized ML and ocean current future tracks for upcoming hours.
-    
-    time_horizon: None (all), 'NOW', '+3H', '+6H', '+12H', '+18H', '+24H', '+36H', '+48H', '+72H'
-    """
-    cache_key = str(time_horizon).upper() if time_horizon else "ALL"
-    now_t = time.time()
-    if cache_key in _ICEBERGS_CACHE:
-        c_time, c_data = _ICEBERGS_CACHE[cache_key]
-        if now_t - c_time < 300.0:  # 5 min TTL
-            return c_data
-
+def _compute_master_icebergs():
+    """Compute and enrich all 85 Antarctic icebergs once with ML kinematics & Coriolis ocean current modeling."""
     from src.iceberg.trajectory_service import iceberg_trajectory_service
 
     data = _load_json("phase3_icebergs.json")
     if not data or "icebergs" not in data:
         return []
-    icebergs = []
+
+    master = []
     for ib in data["icebergs"]:
         ib_id = ib.get("id", "x")
         raw = ib.get("historical", [])
         hist = [p for i, p in enumerate(raw) if i == 0 or p != raw[i-1]][-10:]
         cp = [float(ib.get("current_lat", 0)), float(ib.get("current_lon", 0))]
-        
-        # Extract heading robustly (strip any encoding artifacts)
+
         dir_digits = "".join([c for c in str(ib.get("direction", "275")) if c.isdigit() or c == "."])
         try:
             bearing_val = float(dir_digits) if dir_digits else 275.0
         except ValueError:
             bearing_val = 275.0
 
-        # Compute dynamic 48-hour ML + oceanographic trajectory
         traj_data = iceberg_trajectory_service.compute_trajectory(
             iceberg_id=ib_id,
             current_lat=cp[0],
@@ -335,59 +325,94 @@ def get_icebergs(time_horizon=None):
             size_km=float(ib.get("size", 12.0)),
             horizons_hours=[6, 12, 24, 48]
         )
-        fp = traj_data["forecast_points"]
-        full_pred = traj_data["predicted_trajectory"]
-
-        # Robust normalization of requested horizon (handles URL '+', spaces, etc.)
-        # Robust normalization of requested horizon (handles URL '+', spaces, etc.)
-        clean_req = str(time_horizon or "NOW").strip().upper().replace("+", "")
-        active_h_str = f"+{clean_req}" if clean_req not in ("ALL", "NOW", "") else (clean_req or "NOW")
-
-        target_fp = fp[0]
-        if clean_req not in ("ALL", "NOW", ""):
-            matching_fp = next((p for p in fp if p["horizon"].replace("+", "").upper() == clean_req), None)
-            if matching_fp:
-                target_fp = matching_fp
 
         lat = cp[0]
         lon = cp[1]
         risk = ib.get("risk") or ("SAFE" if abs(lat) > 70 else ("CAUTION" if abs(lat) > 60 else "HIGH"))
         min_cpa = ib.get("min_cpa_km") or round(abs(lat + 63.5) * 111.0, 1)
-        velocity = traj_data["effective_speed_kn"]
-        direction = f"{round(traj_data['effective_bearing_deg'])}\u00b0T"
-        size = ib.get("size", 12.0)
-        areaKm2 = ib.get("areaKm2", 45.0)
-        draft = ib.get("draftEstimate", 220)
-        confidence = ib.get("confidence", 94.8)
-        source = ib.get("sensorSource", "BYU/NIC MERS Radar + NOAA-NIC Polar Grids")
-        
-        # Scale iceberg risk by time horizon (closer = higher risk)
-        if active_h_str == '+48H' and risk == 'SAFE' and min_cpa < 45.0:
-            risk = 'CAUTION'
-        
-        icebergs.append({
+
+        master.append({
             "id": ib_id.upper(),
             "name": f"Iceberg {ib_id.upper()}",
             "latitude": lat,
             "longitude": lon,
             "origin_latitude": cp[0],
             "origin_longitude": cp[1],
+            "velocity": traj_data["effective_speed_kn"],
+            "direction": f"{round(traj_data['effective_bearing_deg'])}\u00b0T",
+            "movementTrend": f"Drift {round(traj_data['effective_bearing_deg'])}\u00b0T under Coriolis & Ekman current forcing ({traj_data['ocean_current_speed_kn']} kn current)",
+            "size": ib.get("size", 12.0),
+            "areaKm2": ib.get("areaKm2", 45.0),
+            "draftEstimate": ib.get("draftEstimate", 220),
+            "confidence": ib.get("confidence", 94.8),
+            "base_risk": risk,
+            "min_cpa": min_cpa,
+            "lastObserved": ib.get("lastObserved", "2024-06-30"),
+            "sensorSource": ib.get("sensorSource", "BYU/NIC MERS Radar + NOAA-NIC Polar Grids"),
+            "historicalTrajectory": hist,
+            "predictedTrajectory": traj_data["predicted_trajectory"],
+            "forecastPoints": traj_data["forecast_points"],
+            "confidenceFactors": {
+                "recentObservations": 96,
+                "historicalMovement": 94,
+                "oceanCurrentConditions": 92,
+                "windConditions": 89,
+                "summary": "High confidence kinematic regression across BYU/NIC 48h temporal steps."
+            }
+        })
+    return master
+
+
+def get_icebergs(time_horizon=None):
+    """Get icebergs with optimized ML and ocean current future tracks (instantaneous from precomputed cache)."""
+    global _MASTER_ICEBERGS_DATA, _MASTER_ICEBERGS_TIMESTAMP
+    now_t = time.time()
+    if _MASTER_ICEBERGS_DATA is None or (now_t - _MASTER_ICEBERGS_TIMESTAMP) > 600.0:  # 10 min TTL
+        _MASTER_ICEBERGS_DATA = _compute_master_icebergs()
+        _MASTER_ICEBERGS_TIMESTAMP = now_t
+
+    clean_req = str(time_horizon or "NOW").strip().upper().replace("+", "")
+    active_h_str = f"+{clean_req}" if clean_req not in ("ALL", "NOW", "") else (clean_req or "NOW")
+
+    result = []
+    for item in _MASTER_ICEBERGS_DATA:
+        fp = item["forecastPoints"]
+        target_fp = fp[0]
+        if clean_req not in ("ALL", "NOW", ""):
+            matching_fp = next((p for p in fp if p["horizon"].replace("+", "").upper() == clean_req), None)
+            if matching_fp:
+                target_fp = matching_fp
+
+        risk = item["base_risk"]
+        min_cpa = item["min_cpa"]
+        if active_h_str == '+48H' and risk == 'SAFE' and min_cpa < 45.0:
+            risk = 'CAUTION'
+
+        full_pred = item["predictedTrajectory"]
+
+        result.append({
+            "id": item["id"],
+            "name": item["name"],
+            "latitude": item["latitude"],
+            "longitude": item["longitude"],
+            "origin_latitude": item["origin_latitude"],
+            "origin_longitude": item["origin_longitude"],
             "forecast_latitude": target_fp["coordinates"][0],
             "forecast_longitude": target_fp["coordinates"][1],
             "forecast_displacement_km": target_fp["displacementKm"],
             "active_horizon": active_h_str,
-            "velocity": velocity,
-            "direction": direction,
-            "movementTrend": f"Drift {direction} under Coriolis & Ekman current forcing ({traj_data['ocean_current_speed_kn']} kn current)",
-            "size": size,
-            "areaKm2": areaKm2,
-            "draftEstimate": draft,
-            "confidence": confidence,
+            "velocity": item["velocity"],
+            "direction": item["direction"],
+            "movementTrend": item["movementTrend"],
+            "size": item["size"],
+            "areaKm2": item["areaKm2"],
+            "draftEstimate": item["draftEstimate"],
+            "confidence": item["confidence"],
             "risk": risk,
             "distanceFromVessel": f"{min_cpa} km",
-            "lastObserved": ib.get("lastObserved", "2024-06-30"),
-            "sensorSource": source,
-            "historicalTrajectory": hist,
+            "lastObserved": item["lastObserved"],
+            "sensorSource": item["sensorSource"],
+            "historicalTrajectory": item["historicalTrajectory"],
             "predictedTrajectory": full_pred,
             "forecastPoints": fp,
             "routeIntersection": {
@@ -398,16 +423,9 @@ def get_icebergs(time_horizon=None):
                 "closestPointCoordinates": full_pred[1] if len(full_pred) > 1 else None,
                 "recommendedAction": "Execute diversion maneuver" if risk == "HIGH" else "Maintain radar watch"
             },
-            "confidenceFactors": {
-                "recentObservations": 96,
-                "historicalMovement": 94,
-                "oceanCurrentConditions": 92,
-                "windConditions": 89,
-                "summary": "High confidence kinematic regression across BYU/NIC 48h temporal steps."
-            }
+            "confidenceFactors": item["confidenceFactors"]
         })
-    _ICEBERGS_CACHE[cache_key] = (now_t, icebergs)
-    return icebergs
+    return result
 
 
 def _get_antarctic_coast_lat(lon_deg):
