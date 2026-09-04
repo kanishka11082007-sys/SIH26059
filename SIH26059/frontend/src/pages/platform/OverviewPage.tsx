@@ -171,21 +171,31 @@ export const OverviewPage: React.FC = () => {
                 <span className="text-[9px] text-glacial-blue font-semibold">{currentRoute.distance} km</span>
               </div>
               <div className="flex items-center gap-1">
-                {(['route-b', 'route-c', 'route-a'] as const).map((rId) => (
-                  <button
-                    key={rId}
-                    type="button"
-                    onClick={() => setActiveRouteId(rId)}
-                    className={cn(
-                      "flex-1 py-1 rounded-sm text-[8.5px] font-semibold font-mono transition-all border",
-                      activeRouteId === rId || (rId === 'route-b' && !activeRouteId)
-                        ? "bg-glacial-blue/20 text-ice-blue border-glacial-blue/50 font-bold"
-                        : "bg-polar-navy/40 text-slate-400 border-slate/20 hover:text-white"
-                    )}
-                  >
-                    {rId === 'route-b' ? 'Optimal' : rId === 'route-c' ? 'Safest' : 'Direct'}
-                  </button>
-                ))}
+                {(routes && routes.length > 0 ? routes : [
+                  { id: 'route-b', name: 'Optimal', optimization_mode: 'BALANCED' },
+                  { id: 'route-c', name: 'Safest', optimization_mode: 'SAFEST' },
+                  { id: 'route-a', name: 'Direct', optimization_mode: 'FASTEST' }
+                ]).map((r: any) => {
+                  const rId = r.id;
+                  const label = rId.includes('route-b') || r.optimization_mode === 'BALANCED' ? 'Optimal' :
+                                rId.includes('route-c') || r.optimization_mode === 'SAFEST' ? 'Safest' : 'Direct';
+                  return (
+                    <button
+                      key={rId}
+                      type="button"
+                      onClick={() => setActiveRouteId(rId)}
+                      className={cn(
+                        "flex-1 py-1 rounded-sm text-[8.5px] font-semibold font-mono transition-all border truncate px-1",
+                        activeRouteId === rId || (rId.includes('route-b') && !activeRouteId)
+                          ? "bg-glacial-blue/20 text-ice-blue border-glacial-blue/50 font-bold"
+                          : "bg-polar-navy/40 text-slate-400 border-slate/20 hover:text-white"
+                      )}
+                      title={r.name || label}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

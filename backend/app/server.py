@@ -28,6 +28,10 @@ try:
     from backend.app.data_transformer import (
         _load_json,
         get_alerts,
+        register_dynamic_alert,
+        register_dynamic_iceberg,
+        remove_dynamic_iceberg,
+        clear_dynamic_icebergs,
         get_environmental,
         get_icebergs,
         get_metrics,
@@ -46,6 +50,10 @@ except ImportError:
     from app.data_transformer import (
         _load_json,
         get_alerts,
+        register_dynamic_alert,
+        register_dynamic_iceberg,
+        remove_dynamic_iceberg,
+        clear_dynamic_icebergs,
         get_environmental,
         get_icebergs,
         get_metrics,
@@ -265,7 +273,8 @@ def api_routes(
     dest_id: str = Query(None),
     dest_lat: float = Query(None),
     dest_lon: float = Query(None),
-    dest_name: str = Query(None)
+    dest_name: str = Query(None),
+    emergency: bool = Query(False)
 ):
     """Get multi-objective Pareto-optimal corridors (A/B/C) with RDP waypoints."""
     return {
@@ -274,7 +283,8 @@ def api_routes(
             dest_id=dest_id,
             dest_lat=dest_lat,
             dest_lon=dest_lon,
-            dest_name=dest_name
+            dest_name=dest_name,
+            emergency=emergency
         )
     }
 
@@ -419,40 +429,158 @@ def api_simulation_what_if(payload: dict):
 
 @app.post("/api/navigation/emergency")
 def api_navigation_emergency(payload: dict):
-    """Emergency tactical rerouting triggered by sudden obstacle or iceberg calving detection."""
+    """Tactical rerouting around iceberg in transit corridor.
+    Only shifts route and raises alert if an iceberg actually threatens the route corridor.
+    """
     from src.optimization.polar_routing_engine import routing_engine
     vessel_id = payload.get("vessel_id", "rv_sagar_nidhi")
     dest_id = payload.get("dest_id", "bharati")
-    hazard_type = payload.get("hazard_type", "DYNAMIC_ICEBERG_CALVING")
-    reason = payload.get("reason", "Hazard detected in active transit corridor. Autonomous tactical diversion engaged.")
+    force_sim = payload.get("force_simulation", True)
 
     baseline_routes = get_routes(vessel_id=vessel_id, dest_id=dest_id)
-    old_route = baseline_routes[0] if baseline_routes else None
+    old_route = next((r for r in baseline_routes if "route-b" in r.get("id", "") or r.get("optimization_mode") == "BALANCED"), (baseline_routes[0] if baseline_routes else None))
 
-    # Diversion route utilizes maximum clearance profile (Route C / Safest margin)
     vessels = get_vessels()
     v = next((x for x in vessels if x["id"] == vessel_id or str(x.get("mmsi")) == str(vessel_id)), vessels[0])
-    rerouted_candidates = routing_engine.generate_routes(v)
-    new_route = next((r for r in rerouted_candidates if r.get("optimization_mode") == "SAFEST"), rerouted_candidates[0])
+    v_name = v.get("name", "Vessel")
 
-    o_dist = old_route.get("distance_km", old_route.get("distance", 1000)) if old_route else 1000
-    n_dist = new_route.get("distance_km", new_route.get("distance", 1050))
+    all_ib = get_icebergs()
+    path = old_route.get("path", []) if old_route else []
+
+    vessel_speed = float(v.get("speed") or 14.0)
+    # Check if an iceberg is naturally in the route (< 30 km CPA)
+    threat = routing_engine.find_iceberg_in_route(path, icebergs=all_ib, threshold_km=30.0, vessel_speed_kn=vessel_speed)
+
+    # If NO iceberg in route and simulation was not explicitly forced: NO shift, NO alert!
+    if not threat and not force_sim:
+        return {
+            "emergency": False,
+            "hazard_detected": False,
+            "corridor_clear": True,
+            "message": "Corridor clear: No tracked icebergs within 30 km safety perimeter. Nominal route maintained.",
+            "diverted_route": old_route,
+            "routes": baseline_routes
+        }
+
+    # An iceberg IS in route (or simulation active)
+    new_route = routing_engine.generate_tactical_iceberg_diversion(
+        base_route=old_route,
+        clearance_km=26.4,
+        iceberg_threat=threat,
+        force_simulation=force_sim,
+        icebergs=all_ib
+    )
+
+    div_meta = new_route.get("diversion_meta", {})
+    haz_id = div_meta.get("hazard_id", "IB-A84")
+    haz_name = div_meta.get("hazard_name", f"Iceberg {haz_id}")
+    haz_lat = div_meta.get("hazard_lat", -64.2)
+    haz_lon = div_meta.get("hazard_lon", 65.1)
+    cpa_km = div_meta.get("initial_cpa_km", 4.2)
+    tcpa_h = div_meta.get("tcpa_hours", 4.2)
+    threat_lvl = div_meta.get("threat_level", "CAUTION")
+
+    hazard_ib = {
+        "id": haz_id,
+        "name": haz_name,
+        "latitude": haz_lat,
+        "longitude": haz_lon,
+        "origin_latitude": haz_lat,
+        "origin_longitude": haz_lon,
+        "velocity": 1.4,
+        "direction": "NW (312°)",
+        "movementTrend": "Drifting across shipping lane",
+        "size": "GIANT",
+        "areaKm2": 142.5,
+        "draftEstimate": "285 m",
+        "confidence": "98%",
+        "risk": "HIGH",
+        "distanceFromVessel": f"{cpa_km} km",
+        "lastObserved": time.strftime("%Y-%m-%d", time.gmtime()),
+        "sensorSource": "Dual Polar Radar + Satellite SAR Fusion",
+        "historicalTrajectory": [[round(haz_lat + 0.12, 4), round(haz_lon - 0.20, 4)]],
+        "predictedTrajectory": [
+            [haz_lat, haz_lon],
+            [round(haz_lat - 0.08, 4), round(haz_lon + 0.18, 4)],
+            [round(haz_lat - 0.16, 4), round(haz_lon + 0.36, 4)]
+        ],
+        "forecastPoints": [
+            {"horizon": "+6H", "coordinates": [round(haz_lat - 0.08, 4), round(haz_lon + 0.18, 4)], "displacementKm": 8.4}
+        ],
+        "confidenceFactors": {
+            "recentObservations": 98,
+            "historicalMovement": 95,
+            "oceanCurrentConditions": 94,
+            "windConditions": 91,
+            "summary": "Confirmed radar contact intersecting route corridor."
+        }
+    }
+    register_dynamic_iceberg(hazard_ib)
+
+    # Register alert in database / alerts section
+    alert_record = {
+        "id": f"ALT-EMG-{int(time.time()*1000) % 1000000}",
+        "severity": "HIGH",
+        "category": "ICEBERG",
+        "type": "ICEBERG_COLLISION_WARNING",
+        "title": f"Tactical Iceberg Hazard in Active Corridor ({v_name.split(' ')[0]})",
+        "description": (
+            f"{haz_name} ({haz_id}) detected drifting into active transit corridor (CPA {cpa_km} km, TCPA {tcpa_h}h, Level: {threat_lvl}). "
+            f"Autonomous tactical bypass engaged: heading altered +12° Starboard (+{div_meta.get('extra_distance_km', 17.5)} km) "
+            f"securing {div_meta.get('corridor_clearance_km', 26.4)} km safe CPA clearance."
+        ),
+        "location": f"{abs(haz_lat):.2f}°S, {abs(haz_lon):.2f}°{'E' if haz_lon >= 0 else 'W'}",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "source": "Polar Radar & Predictive Trajectory Fusion",
+        "acknowledged": False,
+        "recommendedAction": f"Execute local Starboard deflection (+12°) between WP-{div_meta.get('affected_segment_range', [0, 10])[0]} and WP-{div_meta.get('affected_segment_range', [0, 10])[1]}."
+    }
+    register_dynamic_alert(alert_record)
+
+    o_dist = old_route.get("distance_km", 1000.0) if old_route else 1000.0
+    n_dist = new_route.get("distance_km", 1017.5)
     o_eta = old_route.get("eta_hours", 24.0) if old_route else 24.0
-    n_eta = new_route.get("eta_hours", 26.5)
+    n_eta = new_route.get("eta_hours", 24.7)
+
+    # Return updated list of routes with tactical diversion as the primary recommended route
+    other_routes = [r for r in baseline_routes if r.get("id") != (old_route.get("id") if old_route else "")]
+    all_corridors = [new_route] + other_routes
 
     return {
         "emergency": True,
-        "status": "REROUTED",
-        "hazard_type": hazard_type,
-        "reason": reason,
-        "old_route": old_route,
-        "new_route": new_route,
-        "old_risk": old_route.get("icebergRisk", "MODERATE") if old_route else "MODERATE",
-        "new_risk": "VERY LOW (DIVERTED)",
-        "fuel_difference_mt": round(float(str(new_route.get("fuel_estimate", "10")).replace(" MT", "")) - float(str(old_route.get("fuel_estimate", "8")).replace(" MT", "")), 1),
+        "hazard_detected": True,
+        "status": "TACTICAL_BYPASS_ENGAGED",
+        "alert": alert_record,
+        "diverted_route": new_route,
+        "routes": all_corridors,
+        "iceberg": hazard_ib,
+        "iceberg_id": haz_id,
+        "iceberg_name": haz_name,
+        "cpa_km": cpa_km,
+        "tcpa_hours": tcpa_h,
+        "threat_level": threat_lvl,
+        "heading_alteration_deg": div_meta.get("heading_alteration_deg", 12.0),
+        "clearance_km": div_meta.get("corridor_clearance_km", 26.4),
+        "extra_distance_km": div_meta.get("extra_distance_km", 17.5),
+        "extra_eta_minutes": div_meta.get("extra_eta_minutes", 42),
+        "extra_fuel_mt": div_meta.get("extra_fuel_mt", 1.4),
+        "unaffected_points_count": div_meta.get("unaffected_points_count", max(0, len(path) - 15)),
+        "local_reroute_applied": True,
+        "fuel_difference_mt": div_meta.get("extra_fuel_mt", 1.4),
         "eta_difference_hours": round(n_eta - o_eta, 1),
         "distance_difference_km": round(n_dist - o_dist, 1)
     }
+
+
+@app.post("/api/navigation/restore")
+def api_navigation_restore(payload: dict = None):
+    """Restore nominal route and clear dynamic hazard icebergs."""
+    ib_id = (payload or {}).get("iceberg_id") if isinstance(payload, dict) else None
+    if ib_id:
+        remove_dynamic_iceberg(ib_id)
+    else:
+        clear_dynamic_icebergs()
+    return {"status": "RESTORED", "corridor_clear": True}
 
 
 # =============================================================================

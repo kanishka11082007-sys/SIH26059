@@ -339,7 +339,7 @@ async function loadRealData() {
         }
       }).catch(() => {}),
 
-      api.routes().then(routesRes => {
+      api.routes("rv_sagar_nidhi").then(routesRes => {
         if (routesRes?.routes?.length) {
           mockRoutes.length = 0;
           routesRes.routes.forEach((r: any) => mockRoutes.push(r));

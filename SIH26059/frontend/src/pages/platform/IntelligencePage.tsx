@@ -47,8 +47,9 @@ export const IntelligencePage: React.FC = () => {
     loadData();
   }, []);
 
-  // Fetch real routes for selected vessel whenever vessel changes
+  // Fetch real routes for selected vessel only if not already in context
   useEffect(() => {
+    if (contextRoutes && contextRoutes.length > 0) return;
     if (!selectedVessel?.id) return;
     api.routes({
       vesselId: selectedVessel.id,
@@ -60,7 +61,7 @@ export const IntelligencePage: React.FC = () => {
         setLiveRoutes(res.routes);
       }
     }).catch(() => {});
-  }, [selectedVessel?.id, selectedVessel?.dest_lat, selectedVessel?.dest_lon, selectedVessel?.destination]);
+  }, [selectedVessel?.id, selectedVessel?.dest_lat, selectedVessel?.dest_lon, selectedVessel?.destination, contextRoutes]);
 
   const availableRoutes = liveRoutes.length > 0 ? liveRoutes : (contextRoutes.length > 0 ? contextRoutes : []);
   const currentRoute = availableRoutes.find(r => r.id === selectedRouteId || r.id?.includes(selectedRouteId)) ||

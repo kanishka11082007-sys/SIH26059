@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  Loader2, Download, Zap, Ship, MapPin, Sparkles, ShieldAlert
+  Loader2, Download, Zap, Ship, MapPin, Sparkles, ShieldAlert,
+  PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from '../../hooks/useApiData';
@@ -9,6 +10,7 @@ import { GeminiCopilotDrawer } from '../../components/GeminiCopilotDrawer';
 import { api } from '../../services/api';
 import { cn } from '../../utils/cn';
 import PolarMap from '../../components/map/PolarMap';
+import { TacticalHazardBanner } from '../../components/TacticalHazardBanner';
 
 interface Waypoint {
   id: string;
@@ -21,45 +23,6 @@ interface Waypoint {
   iceRisk: string;
   reason?: string;
 }
-
-interface RouteOption {
-  id: string;
-  name: string;
-  vessel_id?: string;
-  distance: number;
-  eta: string;
-  path: [number, number][];
-  recommended?: boolean;
-  iceRisk?: string;
-  icebergRisk?: string;
-  weatherRisk?: string;
-  overallScore?: number;
-  fuelConsumption?: string | number;
-  fuelSavings?: string;
-  sicExposure?: number;
-  icebergEncounters?: number;
-  safetyMargin?: string;
-  rioScore?: number | string;
-  reason?: string;
-  decision_explanation?: string;
-  costs?: Record<string, number>;
-  cost_breakdown?: Record<string, number>;
-  waypoints?: any[];
-}
-
-const PRESET_STATIONS = [
-  { name: 'Bharati Station (Larsemann Hills)', lat: -69.41, lon: 76.19, type: 'Indian Antarctic Research Station' },
-  { name: 'Maitri Station (Schirmacher Oasis)', lat: -70.77, lon: 11.73, type: 'Indian Antarctic Research Station' },
-  { name: 'Neumayer Station III (Atka Bay)', lat: -70.67, lon: -8.27, type: 'German AWI Polar Station' },
-  { name: 'McMurdo Station (Ross Island)', lat: -77.85, lon: 166.67, type: 'US Antarctic Program' },
-  { name: 'Rothera Research Station (Adelaide Island)', lat: -67.57, lon: -68.13, type: 'British Antarctic Survey' },
-  { name: 'Casey Station (Wilkes Land)', lat: -66.28, lon: 110.53, type: 'Australian Antarctic Division' },
-  { name: 'Davis Station (Vestfold Hills)', lat: -68.58, lon: 77.97, type: 'Australian Antarctic Division' },
-  { name: 'Mawson Station (Holme Bay)', lat: -67.60, lon: 62.87, type: 'Australian Antarctic Division' },
-  { name: 'Showa Station (Lützow-Holm Bay)', lat: -69.00, lon: 39.58, type: 'Japan NIPR Polar Station' },
-  { name: 'SANAE IV Station (Queen Maud Land)', lat: -71.67, lon: -2.83, type: 'South African Polar Program' },
-  { name: 'Comandante Ferraz Station (King George Island)', lat: -62.08, lon: -58.38, type: 'PROANTAR Brazil' },
-];
 
 const PRESET_ORIGINS = [
   { name: 'Cape Town Port (South Africa)', lat: -33.92, lon: 18.42 },
@@ -127,17 +90,17 @@ export const NavigationPage: React.FC = () => {
     activeRouteId,
     setActiveRouteId,
     activeRoute: contextActiveRoute,
-    missionId,
-    missionType,
-    setMissionType,
     emergencyRerouteActive,
-    setEmergencyRerouteActive,
+    triggerEmergencyHazard,
     whatIfScenario,
-    setWhatIfScenario
+    setWhatIfScenario,
+    recomputeRoutes,
+    tacticalAlert
   } = useFleet();
 
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // Live iceberg data
   const [icebergs, setIcebergs] = useState<any[]>([]);
@@ -148,6 +111,17 @@ export const NavigationPage: React.FC = () => {
     } catch (e) { /* keep previous */ }
   }, []);
   useEffect(() => { fetchIcebergs(); }, [fetchIcebergs]);
+
+  // Merge dynamic hazard iceberg into map icebergs if active
+  const displayIcebergs = useMemo(() => {
+    if (!tacticalAlert.active || !tacticalAlert.hazardIceberg) {
+      return icebergs;
+    }
+    const haz = tacticalAlert.hazardIceberg;
+    const exists = icebergs.some(ib => ib.id === haz.id);
+    if (exists) return icebergs;
+    return [haz, ...icebergs];
+  }, [icebergs, tacticalAlert.active, tacticalAlert.hazardIceberg]);
 
   // Route Planning Controls derived from active selected vessel
   const [selectedOrigin, setSelectedOrigin] = useState(() => {
@@ -218,16 +192,8 @@ export const NavigationPage: React.FC = () => {
   const handleSolveRoute = async () => {
     setIsOptimizing(true);
     try {
-      const res = await api.routes({
-        vesselId: selectedVessel?.id || 'rv_sagar_nidhi',
-        destLat: selectedDestination.lat,
-        destLon: selectedDestination.lon,
-        destName: selectedDestination.name
-      });
-
-      if (res?.routes?.length) {
-        setLocalRoutes(res.routes);
-        setActiveRouteId('route-b');
+      if (recomputeRoutes) {
+        await recomputeRoutes();
       }
     } catch (err) {
       console.error('Optimization error:', err);
@@ -320,8 +286,13 @@ export const NavigationPage: React.FC = () => {
       }
     >
       <div className="flex flex-col md:flex-row h-full overflow-hidden bg-navy">
-        {/* Left Side: Clean Navigation Controls & Telemetry */}
-        <div className="w-full md:w-80 lg:w-96 border-r border-slate/20 bg-navy/95 backdrop-blur-md overflow-y-auto custom-scrollbar p-5 space-y-5 flex flex-col justify-between shrink-0">
+        {/* Left Side: Collapsible Navigation Controls & Telemetry */}
+        <div className={cn(
+          "border-r border-slate/20 bg-navy/95 backdrop-blur-md overflow-y-auto custom-scrollbar flex flex-col justify-between shrink-0 transition-all duration-300 ease-in-out",
+          isSidebarOpen 
+            ? "w-full md:w-80 lg:w-96 p-5 opacity-100" 
+            : "w-0 p-0 border-none opacity-0 overflow-hidden"
+        )}>
           <div className="space-y-4">
             
             {/* 1. Mission Parameters */}
@@ -370,16 +341,16 @@ export const NavigationPage: React.FC = () => {
               <div className="pt-2 space-y-1.5 border-t border-slate/20">
                 <button
                   type="button"
-                  onClick={() => setEmergencyRerouteActive(!emergencyRerouteActive)}
+                  onClick={triggerEmergencyHazard}
                   className={cn(
-                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border",
+                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
                     emergencyRerouteActive
-                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral animate-pulse"
-                      : "bg-polar-navy/40 border-slate/30 text-slate-300 hover:text-white"
+                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral animate-pulse shadow-[0_0_15px_rgba(255,107,94,0.3)]"
+                      : "bg-polar-navy/40 border-slate/30 text-slate-300 hover:text-white hover:border-glacial-blue"
                   )}
                 >
                   <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>{emergencyRerouteActive ? "EMERGENCY DIVERSION ACTIVE" : "SIMULATE HAZARD / DIVERSION"}</span>
+                  <span>{emergencyRerouteActive ? "TACTICAL DIVERSION ACTIVE" : "SIMULATE HAZARD / DIVERSION"}</span>
                 </button>
 
                 <button
@@ -535,7 +506,30 @@ export const NavigationPage: React.FC = () => {
         </div>
 
         {/* Right Side: Interactive Polar Map with Real Vessel, Route, and Waypoints */}
-        <div className="flex-1 relative h-full bg-[#030910]">
+        <div className="flex-1 relative h-full bg-[#030910] overflow-hidden">
+          {/* Floating Sidebar Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-md bg-[#030d1a]/90 hover:bg-[#081e36] border border-slate/30 text-ice-white hover:text-glacial-blue text-xs font-mono flex items-center gap-1.5 shadow-lg backdrop-blur-md cursor-pointer transition-all"
+            title={isSidebarOpen ? "Hide sidebar (full map view)" : "Show route controls"}
+          >
+            {isSidebarOpen ? (
+              <>
+                <PanelLeftClose className="w-3.5 h-3.5 text-glacial-blue" />
+                <span className="text-[11px] hidden sm:inline">Hide Sidebar</span>
+              </>
+            ) : (
+              <>
+                <PanelLeftOpen className="w-3.5 h-3.5 text-glacial-blue" />
+                <span className="text-[11px] font-semibold text-glacial-blue">Route Controls</span>
+              </>
+            )}
+          </button>
+
+          {/* Compact Floating HUD Tactical Hazard Alert */}
+          <TacticalHazardBanner className="absolute top-3 left-1/2 -translate-x-1/2 z-50 max-w-xl w-full px-3 pointer-events-auto" />
+
           <PolarMap
             section="navigation"
             destinationMarker={destMarker}
@@ -544,7 +538,7 @@ export const NavigationPage: React.FC = () => {
             customRoutePath={activeRoute?.path}
             allRoutes={routes}
             waypoints={waypoints}
-            icebergs={icebergs}
+            icebergs={displayIcebergs}
             selectedIcebergId={selectedIcebergId}
             onSelectIceberg={(id) => setSelectedIcebergId(id)}
             vesselInfo={activeVesselTelemetry}

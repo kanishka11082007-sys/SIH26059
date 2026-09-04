@@ -47,7 +47,7 @@ export async function loadData(): Promise<void> {
     await Promise.all([
       api.vessels(),
       api.icebergs(),
-      api.routes(),
+      api.routes("rv_sagar_nidhi"),
       api.metrics(),
       api.environmental(),
       api.seaIceSectors(),

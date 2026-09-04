@@ -57,7 +57,7 @@ export const api = {
     const qs = timeHorizon ? `?time_horizon=${timeHorizon}` : "";
     return apiFetch<{icebergs: any[]}>(`/icebergs${qs}`);
   },
-  routes: (params?: { vesselId?: string; destId?: string; destLat?: number; destLon?: number; destName?: string } | string) => {
+  routes: (params?: { vesselId?: string; destId?: string; destLat?: number; destLon?: number; destName?: string; emergency?: boolean } | string) => {
     if (typeof params === 'string') {
       return apiFetch<{routes: any[]}>(`/routes?vessel_id=${params}`);
     }
@@ -67,9 +67,13 @@ export const api = {
     if (params?.destLat !== undefined) q.append("dest_lat", String(params.destLat));
     if (params?.destLon !== undefined) q.append("dest_lon", String(params.destLon));
     if (params?.destName) q.append("dest_name", params.destName);
+    if (params?.emergency) q.append("emergency", "true");
     const qs = q.toString() ? `?${q.toString()}` : "";
     return apiFetch<{routes: any[]}>(`/routes${qs}`);
   },
+  emergency: (payload: { vessel_id?: string; dest_id?: string; hazard_type?: string; reason?: string; force_simulation?: boolean }) => 
+    apiPost<{ emergency: boolean; status: string; alert: any; old_route: any; new_route: any; diverted_route: any; routes: any[]; heading_alteration_deg: number; clearance_km: number; extra_distance_km: number; extra_eta_minutes?: number; hazard_detected?: boolean; iceberg?: any; iceberg_id?: string; iceberg_name?: string; cpa_km?: number; tcpa_hours?: number; threat_level?: string; extra_fuel_mt?: number; local_reroute_applied?: boolean; unaffected_points_count?: number }>("/navigation/emergency", payload),
+  restore: (payload?: any) => apiPost<{ status: string; corridor_clear: boolean }>("/navigation/restore", payload || {}),
   metrics: () => apiFetch<Record<string, any>>("/metrics"),
   environmental: (timeStep?: string) => {
     const qs = timeStep ? `?time_step=${timeStep}` : "";

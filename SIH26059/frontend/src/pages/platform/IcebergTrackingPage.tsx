@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  Mountain, Clock, Ship
+  Mountain, Clock, Ship,
+  PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from "../../hooks/useApiData";
 import { useFleet } from '../../context/FleetContext';
 import PolarMap from '../../components/map/PolarMap';
+import { TacticalHazardBanner } from '../../components/TacticalHazardBanner';
 import { api } from '../../services/api';
 import { cn } from '../../utils/cn';
 
@@ -47,8 +49,13 @@ export const IcebergTrackingPage: React.FC = () => {
     selectedVessel, 
     setSelectedVesselId,
     selectedIcebergId,
-    setSelectedIcebergId 
+    setSelectedIcebergId,
+    selectedDestination,
+    routes,
+    activeRouteId,
+    setActiveRouteId
   } = useFleet();
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [activeHorizon, setActiveHorizon] = useState<'NOW' | '+6H' | '+12H' | '+24H' | '+48H'>('NOW');
   const [icebergs, setIcebergs] = useState<Iceberg[]>([]);
   useApiData();
@@ -112,9 +119,12 @@ export const IcebergTrackingPage: React.FC = () => {
         </div>
       }
     >
-      <div className="flex flex-col md:flex-row h-full overflow-hidden bg-navy">
+      <div className="flex flex-col md:flex-row h-full overflow-hidden bg-navy relative">
         {/* Left Side: Target Inspector */}
-        <div className="w-full md:w-80 lg:w-96 border-r border-slate/20 bg-navy/95 backdrop-blur-md overflow-y-auto custom-scrollbar p-5 space-y-5 flex flex-col justify-between shrink-0">
+        <div className={cn(
+          "border-r border-slate/20 bg-navy/95 backdrop-blur-md overflow-y-auto custom-scrollbar flex flex-col justify-between shrink-0 transition-all duration-300 z-20",
+          isSidebarOpen ? "w-full md:w-80 lg:w-96 p-5 opacity-100" : "w-0 p-0 overflow-hidden opacity-0 border-r-0 pointer-events-none"
+        )}>
           <div className="space-y-4">
             
             {/* Active Vessel Selector */}
@@ -288,14 +298,44 @@ export const IcebergTrackingPage: React.FC = () => {
 
         {/* Right Side: Map */}
         <div className="flex-1 relative h-full bg-navy">
+          {/* Floating Collapsible Sidebar Toggle */}
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-sm bg-polar-navy/90 hover:bg-polar-navy border border-slate/40 text-slate-300 hover:text-white text-xs font-mono flex items-center gap-1.5 shadow-lg backdrop-blur-md cursor-pointer transition-all hover:border-glacial-blue/50"
+            title={isSidebarOpen ? "Hide Left Panel for clean full-screen map" : "Show Targets Panel"}
+          >
+            {isSidebarOpen ? (
+              <>
+                <PanelLeftClose className="w-3.5 h-3.5 text-glacial-blue" />
+                <span className="hidden sm:inline text-[11px]">Hide Sidebar</span>
+              </>
+            ) : (
+              <>
+                <PanelLeftOpen className="w-3.5 h-3.5 text-glacial-blue" />
+                <span className="text-[11px] text-glacial-blue font-semibold">Targets</span>
+              </>
+            )}
+          </button>
+
+          <TacticalHazardBanner className="absolute top-3 left-1/2 -translate-x-1/2 z-50 max-w-xl w-full px-3 pointer-events-auto" />
           <PolarMap
             section="icebergs"
+            showRoute={true}
             selectedIcebergId={selectedIceberg?.id || null}
             onSelectIceberg={(id) => setSelectedIcebergId(id)}
             activeHorizon={activeHorizon}
             icebergs={icebergs}
             selectedVesselId={selectedVesselId}
             onSelectVessel={(id) => setSelectedVesselId(id)}
+            destinationMarker={selectedDestination ? {
+              latitude: selectedDestination.latitude,
+              longitude: selectedDestination.longitude,
+              name: selectedDestination.name
+            } : undefined}
+            allRoutes={routes}
+            activeRouteId={activeRouteId}
+            onSelectRoute={(rId) => setActiveRouteId(rId)}
           />
         </div>
       </div>

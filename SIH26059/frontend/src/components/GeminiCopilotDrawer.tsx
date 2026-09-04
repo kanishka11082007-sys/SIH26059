@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, Sparkles, Send, ShieldCheck, Cpu, CheckCircle2, 
-  AlertTriangle, Compass, Fuel, Shield, Clock, Loader2 
+  AlertTriangle, Compass, Shield, Loader2 
 } from 'lucide-react';
 import { api } from '../services/api';
 import { cn } from '../utils/cn';

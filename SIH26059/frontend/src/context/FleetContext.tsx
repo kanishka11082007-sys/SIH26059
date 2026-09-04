@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 
 export interface CanonicalVessel {
@@ -52,6 +52,8 @@ export interface RouteOption {
   icebergEncounters?: number;
   costs?: Record<string, number>;
   cost_breakdown?: Record<string, number>;
+  has_iceberg_hazard?: boolean;
+  iceberg_threat?: any;
   path: [number, number][];
   waypoints?: any[];
 }
@@ -323,6 +325,37 @@ interface FleetContextType {
   activeRoute: RouteOption | null;
   emergencyRerouteActive: boolean;
   setEmergencyRerouteActive: (active: boolean) => void;
+  tacticalAlert: {
+    active: boolean;
+    phase: 'idle' | 'detecting' | 'diverted';
+    title?: string;
+    description?: string;
+    icebergId?: string;
+    headingChange?: string;
+    clearanceKm?: number;
+    extraDistKm?: number;
+    extraEtaMinutes?: number;
+    alertId?: string;
+    timestamp?: string;
+    hazardIceberg?: any;
+  };
+  setTacticalAlert: React.Dispatch<React.SetStateAction<{
+    active: boolean;
+    phase: 'idle' | 'detecting' | 'diverted';
+    title?: string;
+    description?: string;
+    icebergId?: string;
+    headingChange?: string;
+    clearanceKm?: number;
+    extraDistKm?: number;
+    extraEtaMinutes?: number;
+    alertId?: string;
+    timestamp?: string;
+    hazardIceberg?: any;
+  }>>;
+  triggerEmergencyHazard: () => Promise<void>;
+  dismissTacticalAlert: () => void;
+  recomputeRoutes: () => Promise<void>;
   whatIfScenario: {
     active: boolean;
     icebergDriftOffsetKm: number;
@@ -347,7 +380,7 @@ const MISSION_TYPE_KEY = 'polarnav_mission_type';
 
 export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [fleet, setFleet] = useState<CanonicalVessel[]>(CANONICAL_FLEET);
-  const [stations, setStations] = useState<AntarcticStation[]>(CANONICAL_STATIONS);
+  const [stations] = useState<AntarcticStation[]>(CANONICAL_STATIONS);
   const [selectedVesselId, setSelectedVesselIdState] = useState<string>(() => {
     return localStorage.getItem(STORAGE_KEY) || 'rv_sagar_nidhi';
   });
@@ -366,10 +399,29 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     windGustKnots: 20.0
   });
 
+  const [tacticalAlert, setTacticalAlert] = useState<{
+    active: boolean;
+    phase: 'idle' | 'detecting' | 'diverted';
+    title?: string;
+    description?: string;
+    icebergId?: string;
+    headingChange?: string;
+    clearanceKm?: number;
+    extraDistKm?: number;
+    extraEtaMinutes?: number;
+    alertId?: string;
+    timestamp?: string;
+    hazardIceberg?: any;
+  }>({
+    active: false,
+    phase: 'idle'
+  });
+
   const [selectedIcebergId, setSelectedIcebergId] = useState<string | null>(null);
   const [routes, setRoutes] = useState<RouteOption[]>([]);
   const [activeRouteId, setActiveRouteId] = useState<string>('route-b');
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const routeCacheRef = useRef<Map<string, RouteOption[]>>(new Map());
 
   // Set selected vessel with persistence
   const setSelectedVesselId = useCallback((id: string) => {
@@ -450,25 +502,149 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return `MIS-2026-${(selectedVessel?.id || 'VESSEL').replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}`;
   }, [selectedVessel?.id]);
 
-  // Fetch / update corridors reactively for the selected vessel AND destination
-  useEffect(() => {
+  // Dismiss tactical alert and restore nominal route
+  const dismissTacticalAlert = useCallback(() => {
+    setTacticalAlert({ active: false, phase: 'idle' });
+    setEmergencyRerouteActive(false);
+    api.restore().catch(() => {});
+    if (selectedVessel && selectedDestination) {
+      const cacheKey = `${selectedVessel.id}_${selectedDestination.id}_em_${whatIfScenario.active ? 'whatif' : 'norm'}`;
+      routeCacheRef.current.delete(cacheKey);
+      const normKey = `${selectedVessel.id}_${selectedDestination.id}_norm_${whatIfScenario.active ? 'whatif' : 'norm'}`;
+      if (routeCacheRef.current.has(normKey)) {
+        setRoutes(routeCacheRef.current.get(normKey)!);
+      } else {
+        api.routes({
+          vesselId: selectedVessel.id,
+          destId: selectedDestination.id,
+          destLat: selectedDestination.latitude,
+          destLon: selectedDestination.longitude,
+          destName: selectedDestination.name,
+          emergency: false
+        }).then((res) => {
+          if (res?.routes?.length) {
+            setRoutes(res.routes);
+          }
+        }).catch(() => {});
+      }
+    }
+  }, [selectedVessel, selectedDestination, whatIfScenario.active]);
+
+  // Trigger tactical emergency avoidance when iceberg hazard is detected
+  const triggerEmergencyHazard = useCallback(async () => {
+    if (emergencyRerouteActive) {
+      // Toggle off / restore normal planned route
+      setEmergencyRerouteActive(false);
+      setTacticalAlert({ active: false, phase: 'idle' });
+      return;
+    }
+
+    // Phase 1: Small on-screen alert banner for immediate warning
+    setTacticalAlert({
+      active: true,
+      phase: 'detecting',
+      title: 'SCANNING ROUTE FOR ICEBERG HAZARDS...',
+      description: `Analyzing forward radar contacts and drift vectors along active corridor of ${selectedVessel.name}...`,
+    });
+
+    try {
+      const res = await api.emergency({
+        vessel_id: selectedVessel?.id,
+        dest_id: selectedDestination?.id
+      });
+
+      if (res?.emergency && res.diverted_route && res.hazard_detected !== false) {
+        setEmergencyRerouteActive(true);
+        const hazId = res.iceberg_id || res.iceberg?.id || 'IB-A84';
+        const hazName = res.iceberg_name || res.iceberg?.name || `Iceberg ${hazId}`;
+        const cpa = res.cpa_km || res.iceberg?.cpa_km || 4.2;
+
+        if (res.routes?.length) {
+          const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => ({
+            id: r.id || (idx === 0 ? 'route-tactical' : idx === 1 ? 'route-b' : 'route-c'),
+            name: r.name || (idx === 0 ? 'ROUTE B (TACTICAL BYPASS)' : 'ROUTE OPTION'),
+            vessel_id: selectedVessel?.id,
+            distance: typeof r.distance_km === 'number' ? r.distance_km : parseFloat(String(r.distance || '').replace(/[^0-9.]/g, '')) || 3817,
+            eta: r.eta || '32h 45m',
+            iceRisk: r.iceRisk || 'LOW (EVADED)',
+            icebergRisk: 'SAFE (DIVERTED)',
+            weatherRisk: r.weatherRisk || 'MODERATE',
+            overallScore: r.overallScore || 94,
+            recommended: r.recommended ?? (idx === 0),
+            rioScore: r.rioScore ?? '+8.4',
+            sicExposure: r.sicExposure ?? 22,
+            reason: r.reason || 'Tactical iceberg evasion corridor.',
+            decision_explanation: r.decision_explanation || r.reason,
+            fuelConsumption: r.fuelConsumption || r.fuel_estimate || '106 MT',
+            safetyMargin: 'VERIFIED',
+            costs: r.costs || {},
+            cost_breakdown: r.cost_breakdown || {},
+            has_iceberg_hazard: true,
+            iceberg_threat: res.iceberg,
+            path: r.path || [],
+            waypoints: r.waypoints || []
+          }));
+          const emCacheKey = `${selectedVessel.id}_${selectedDestination.id}_em_${whatIfScenario.active ? 'whatif' : 'norm'}`;
+          routeCacheRef.current.set(emCacheKey, formatted);
+          setRoutes(formatted);
+          setActiveRouteId(res.diverted_route.id || formatted[0].id);
+        }
+
+        // Phase 2: Route optimized with small direction change & alert logged to DB
+        setTacticalAlert({
+          active: true,
+          phase: 'diverted',
+          title: `TACTICAL ICEBERG HAZARD IN ROUTE: ${hazId}`,
+          description: `${hazName} detected drifting into transit corridor (${cpa} km CPA). Shifted heading +${res.heading_alteration_deg || 12}° Starboard (+${res.extra_distance_km || 17.5} km). 26.4 km safe CPA clearance secured. Registered in alerts.`,
+          icebergId: hazId,
+          headingChange: `+${res.heading_alteration_deg || 12}° Starboard`,
+          clearanceKm: res.clearance_km || 26.4,
+          extraDistKm: res.extra_distance_km || 17.5,
+          extraEtaMinutes: res.extra_eta_minutes || 42,
+          alertId: res.alert?.id,
+          timestamp: 'Just now',
+          hazardIceberg: res.iceberg
+        });
+      } else {
+        // No iceberg detected in route
+        setEmergencyRerouteActive(false);
+        setTacticalAlert({
+          active: true,
+          phase: 'idle',
+          title: 'ROUTE CORRIDOR CLEAR',
+          description: `No iceberg collision hazards detected along active transit path of ${selectedVessel.name}. Nominal route maintained.`
+        });
+        setTimeout(() => {
+          setTacticalAlert({ active: false, phase: 'idle' });
+        }, 3500);
+      }
+    } catch (e) {
+      console.error('Failed to trigger emergency hazard diversion:', e);
+      setEmergencyRerouteActive(false);
+    }
+  }, [emergencyRerouteActive, selectedVessel, selectedDestination, whatIfScenario.active]);
+
+  // Recompute route actively on demand (clearing cache)
+  const recomputeRoutes = useCallback(async () => {
     if (!selectedVessel || !selectedDestination) return;
-    
-    let isCancelled = false;
-    api.routes({
-      vesselId: selectedVessel.id,
-      destId: selectedDestination.id,
-      destLat: selectedDestination.latitude,
-      destLon: selectedDestination.longitude,
-      destName: selectedDestination.name
-    }).then((res) => {
-      if (isCancelled) return;
+    const cacheKey = `${selectedVessel.id}_${selectedDestination.id}_${emergencyRerouteActive ? 'em' : 'norm'}_${whatIfScenario.active ? 'whatif' : 'norm'}`;
+    routeCacheRef.current.delete(cacheKey);
+
+    try {
+      const res = await api.routes({
+        vesselId: selectedVessel.id,
+        destId: selectedDestination.id,
+        destLat: selectedDestination.latitude,
+        destLon: selectedDestination.longitude,
+        destName: selectedDestination.name,
+        emergency: emergencyRerouteActive
+      });
       if (res?.routes?.length) {
         const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => ({
           id: r.id || (idx === 1 ? 'route-b' : idx === 2 ? 'route-c' : 'route-a'),
           name: r.name || (idx === 1 ? 'ROUTE B (OPTIMAL)' : idx === 2 ? 'ROUTE C (SAFEST)' : 'ROUTE A (FASTEST)'),
           vessel_id: selectedVessel.id,
-          distance: r.distance || r.distance_km || 3800,
+          distance: typeof r.distance_km === 'number' ? r.distance_km : parseFloat(String(r.distance || '').replace(/[^0-9.]/g, '')) || 3800,
           eta: r.eta || '32h 05m',
           iceRisk: r.iceRisk || r.ice_risk || (r.id?.includes('route-a') ? 'HIGH' : r.id?.includes('route-b') ? 'MODERATE' : 'LOW'),
           icebergRisk: r.icebergRisk || 'LOW',
@@ -486,6 +662,60 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           path: r.path || [],
           waypoints: r.waypoints || []
         }));
+        routeCacheRef.current.set(cacheKey, formatted);
+        setRoutes(formatted);
+        setActiveRouteId(formatted[0].id);
+      }
+    } catch (e) {
+      console.error('Failed to recompute routes:', e);
+    }
+  }, [selectedVessel, selectedDestination, emergencyRerouteActive, whatIfScenario.active]);
+
+  // Fetch / update corridors reactively for the selected vessel AND destination with zero-delay client caching
+  useEffect(() => {
+    if (!selectedVessel || !selectedDestination) return;
+
+    const cacheKey = `${selectedVessel.id}_${selectedDestination.id}_${emergencyRerouteActive ? 'em' : 'norm'}_${whatIfScenario.active ? 'whatif' : 'norm'}`;
+
+    if (routeCacheRef.current.has(cacheKey)) {
+      setRoutes(routeCacheRef.current.get(cacheKey)!);
+      return;
+    }
+    
+    let isCancelled = false;
+    api.routes({
+      vesselId: selectedVessel.id,
+      destId: selectedDestination.id,
+      destLat: selectedDestination.latitude,
+      destLon: selectedDestination.longitude,
+      destName: selectedDestination.name,
+      emergency: emergencyRerouteActive
+    }).then((res) => {
+      if (isCancelled) return;
+      if (res?.routes?.length) {
+        const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => ({
+          id: r.id || (idx === 1 ? 'route-b' : idx === 2 ? 'route-c' : 'route-a'),
+          name: r.name || (idx === 1 ? 'ROUTE B (OPTIMAL)' : idx === 2 ? 'ROUTE C (SAFEST)' : 'ROUTE A (FASTEST)'),
+          vessel_id: selectedVessel.id,
+          distance: typeof r.distance_km === 'number' ? r.distance_km : parseFloat(String(r.distance || '').replace(/[^0-9.]/g, '')) || 3800,
+          eta: r.eta || '32h 05m',
+          iceRisk: r.iceRisk || r.ice_risk || (r.id?.includes('route-a') ? 'HIGH' : r.id?.includes('route-b') ? 'MODERATE' : 'LOW'),
+          icebergRisk: r.icebergRisk || 'LOW',
+          weatherRisk: r.weatherRisk || 'MODERATE',
+          overallScore: r.overallScore || (r.id?.includes('route-b') ? 92 : r.id?.includes('route-c') ? 84 : 48),
+          recommended: r.recommended ?? (r.id?.includes('route-b') || idx === 1),
+          rioScore: r.rioScore ?? r.rio_score ?? (r.id?.includes('route-a') ? -2.8 : r.id?.includes('route-b') ? 8.4 : 14.8),
+          sicExposure: r.sicExposure ?? (r.id?.includes('route-a') ? 65 : r.id?.includes('route-b') ? 22 : 6),
+          reason: r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
+          decision_explanation: r.decision_explanation || r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
+          fuelConsumption: r.fuelConsumption || r.fuel_estimate || '104 MT',
+          safetyMargin: r.safetyMargin || 'OPTIMAL',
+          costs: r.costs || r.cost_breakdown || {},
+          cost_breakdown: r.cost_breakdown || r.costs || {},
+          path: r.path || [],
+          waypoints: r.waypoints || []
+        }));
+        routeCacheRef.current.set(cacheKey, formatted);
         setRoutes(formatted);
       }
     }).catch(() => {});
@@ -522,10 +752,15 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     activeRoute,
     emergencyRerouteActive,
     setEmergencyRerouteActive,
+    tacticalAlert,
+    setTacticalAlert,
+    triggerEmergencyHazard,
+    dismissTacticalAlert,
     whatIfScenario,
     setWhatIfScenario,
     isLoading,
-    refreshFleet
+    refreshFleet,
+    recomputeRoutes
   }), [
     fleet,
     selectedVesselId,
@@ -545,9 +780,13 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     activeRouteId,
     activeRoute,
     emergencyRerouteActive,
+    tacticalAlert,
+    triggerEmergencyHazard,
+    dismissTacticalAlert,
     whatIfScenario,
     isLoading,
-    refreshFleet
+    refreshFleet,
+    recomputeRoutes
   ]);
 
   return (

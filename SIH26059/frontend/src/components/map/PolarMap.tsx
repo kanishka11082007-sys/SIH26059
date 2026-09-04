@@ -17,7 +17,10 @@ import {
   Ship,
   ShieldAlert,
   Waves,
-  X
+  X,
+  Plus,
+  Minus,
+  Eye
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useFleet, CANONICAL_FLEET } from '../../context/FleetContext';
@@ -71,6 +74,39 @@ const CIRCUMPOLAR_SECTOR = {
   zoom: 2.5,
   label: 'Circumpolar Antarctic Basin'
 };
+
+// Split coordinates into MultiLineString segments if crossing the 180°/-180° antimeridian
+function splitAntimeridianLine(coords: [number, number][]): [number, number][][] {
+  if (!coords || coords.length < 2) return [coords || []];
+  const segments: [number, number][][] = [];
+  let currentSegment: [number, number][] = [coords[0]];
+
+  for (let i = 1; i < coords.length; i++) {
+    const prev = coords[i - 1];
+    const curr = coords[i];
+    const dLon = curr[0] - prev[0];
+
+    // Detect antimeridian jump (> 180 degrees)
+    if (Math.abs(dLon) > 180) {
+      const sign = dLon > 0 ? -1 : 1;
+      const boundaryPrevLon = sign > 0 ? 180 : -180;
+      const boundaryCurrLon = sign > 0 ? -180 : 180;
+      const denom = (Math.abs(boundaryPrevLon - prev[0]) + Math.abs(curr[0] - boundaryCurrLon));
+      const frac = denom !== 0 ? Math.abs(boundaryPrevLon - prev[0]) / denom : 0.5;
+      const interLat = prev[1] + (curr[1] - prev[1]) * Math.max(0, Math.min(1, frac));
+
+      currentSegment.push([boundaryPrevLon, interLat]);
+      segments.push(currentSegment);
+      currentSegment = [[boundaryCurrLon, interLat], curr];
+    } else {
+      currentSegment.push(curr);
+    }
+  }
+  if (currentSegment.length > 0) {
+    segments.push(currentSegment);
+  }
+  return segments;
+}
 
 
 // Gaussian smoothing helper for seamless circumpolar waves
@@ -272,8 +308,8 @@ interface SectionLayerConfig {
 const SECTION_CONFIGS: Record<MapSection, SectionLayerConfig> = {
   'overview':      { showSeaIce: true,  showIcebergs: true,  showVessel: true,  showHistoricalVessels: true,  showRoute: true },
   'navigation':    { showSeaIce: true,  showIcebergs: true,  showVessel: true,  showHistoricalVessels: true,  showRoute: true },
-  'sea-ice':       { showSeaIce: true,  showIcebergs: false, showVessel: true,  showHistoricalVessels: false, showRoute: false },
-  'icebergs':      { showSeaIce: false, showIcebergs: true,  showVessel: true,  showHistoricalVessels: false, showRoute: false },
+  'sea-ice':       { showSeaIce: true,  showIcebergs: true,  showVessel: true,  showHistoricalVessels: false, showRoute: true },
+  'icebergs':      { showSeaIce: false, showIcebergs: true,  showVessel: true,  showHistoricalVessels: false, showRoute: true },
   'routes':        { showSeaIce: true,  showIcebergs: true,  showVessel: true,  showHistoricalVessels: true,  showRoute: true },
   'intelligence':  { showSeaIce: false, showIcebergs: false, showVessel: false, showHistoricalVessels: false, showRoute: false },
 };
@@ -398,6 +434,10 @@ export const PolarMap: React.FC<PolarMapProps> = ({
   const [viewportMode, setViewportMode] = useState<'OPERATIONAL' | 'CIRCUMPOLAR'>('OPERATIONAL');
   const [mapZoom, setMapZoom] = useState<number>(OPERATIONAL_SECTOR.zoom);
   const mapZoomRef = useRef<number>(OPERATIONAL_SECTOR.zoom);
+  const userInteractedRef = useRef<boolean>(false);
+  const lastTargetKeyRef = useRef<string>('');
+  const [mapPitch, setMapPitch] = useState<number>(0);
+  const [mapBearing, setMapBearing] = useState<number>(0);
 
   // Floating HUD UI state
   const [layersMenuOpen, setLayersMenuOpen] = useState(false);
@@ -471,29 +511,33 @@ export const PolarMap: React.FC<PolarMapProps> = ({
   // Fetch routes for current active vessel & destination
   useEffect(() => {
     if (allRoutes && allRoutes.length > 0) {
-      const isForActive = allRoutes.every((r: any) => !r.vessel_id || r.vessel_id === activeVessel?.id);
-      if (isForActive) {
-        setVesselRoutes(allRoutes);
-        return;
-      }
+      setVesselRoutes(allRoutes);
+      return;
     }
     if (!activeVessel?.id) return;
     const dLat = destinationMarker?.latitude ?? (destinationMarker as any)?.lat ?? activeVessel.dest_lat;
     const dLon = destinationMarker?.longitude ?? (destinationMarker as any)?.lon ?? activeVessel.dest_lon;
     const dName = destinationMarker?.name ?? activeVessel.destination;
+    let isCancelled = false;
     api.routes({
       vesselId: activeVessel.id,
       destLat: dLat,
       destLon: dLon,
       destName: dName
     }).then((res) => {
+      if (isCancelled) return;
       if (res?.routes?.length) {
         setVesselRoutes(res.routes);
       } else {
         setVesselRoutes([]);
       }
-    }).catch(() => setVesselRoutes([]));
-  }, [activeVessel?.id, destinationMarker?.latitude, destinationMarker?.longitude, (destinationMarker as any)?.lat, (destinationMarker as any)?.lon, allRoutes]);
+    }).catch(() => {
+      if (!isCancelled) setVesselRoutes([]);
+    });
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeVessel?.id, destinationMarker?.latitude, destinationMarker?.longitude, allRoutes]);
 
   // Fetch ALL real icebergs from backend API (all 85 targets)
   useEffect(() => {
@@ -567,30 +611,10 @@ export const PolarMap: React.FC<PolarMapProps> = ({
     }
   };
 
-  // Automatically frame the active voyage (vessel to destination) when destination or vessel changes
-  useEffect(() => {
-    if (!mapInstanceRef.current || !activeVessel) return;
-    const dLat = destinationMarker?.latitude ?? (destinationMarker as any)?.lat ?? activeVessel.dest_lat;
-    const dLon = destinationMarker?.longitude ?? (destinationMarker as any)?.lon ?? activeVessel.dest_lon;
-    const vLat = activeVessel.latitude;
-    const vLon = activeVessel.longitude;
-    if (typeof dLat === 'number' && typeof dLon === 'number' && !isNaN(dLat) && !isNaN(dLon)) {
-      const minLon = Math.min(vLon, dLon) - 3.5;
-      const maxLon = Math.max(vLon, dLon) + 3.5;
-      const minLat = Math.min(vLat, dLat) - 2;
-      const maxLat = Math.max(vLat, dLat) + 2;
-
-      mapInstanceRef.current.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
-        padding: { top: 80, bottom: 100, left: 80, right: 80 },
-        maxZoom: 5.8,
-        duration: 1200
-      });
-    }
-  }, [activeVessel?.id, destinationMarker?.latitude, destinationMarker?.longitude]);
-
   // Viewport switch handler
   const handleViewportSwitch = (mode: 'OPERATIONAL' | 'CIRCUMPOLAR') => {
     setViewportMode(mode);
+    userInteractedRef.current = false;
     if (!mapInstanceRef.current) return;
     if (mode === 'OPERATIONAL') {
       const vLon = activeVessel?.longitude ?? OPERATIONAL_SECTOR.center[0];
@@ -599,6 +623,8 @@ export const PolarMap: React.FC<PolarMapProps> = ({
       mapInstanceRef.current.flyTo({
         center: [vLon, vLat],
         zoom: OPERATIONAL_SECTOR.zoom,
+        pitch: 0,
+        bearing: 0,
         duration: 1200,
         essential: true
       });
@@ -607,13 +633,69 @@ export const PolarMap: React.FC<PolarMapProps> = ({
       mapInstanceRef.current.flyTo({
         center: CIRCUMPOLAR_SECTOR.center,
         zoom: CIRCUMPOLAR_SECTOR.zoom,
+        pitch: 0,
+        bearing: 0,
         duration: 1400,
         essential: true
       });
     }
   };
 
-  // 1. Initialize MapLibre GL Map (OPERATIONAL FOCUSED INITIAL VIEW — always starts on Antarctic Peninsula)
+  // Floating 3D HUD action handlers
+  const handleZoomIn = () => {
+    mapInstanceRef.current?.zoomIn({ duration: 300 });
+  };
+
+  const handleZoomOut = () => {
+    mapInstanceRef.current?.zoomOut({ duration: 300 });
+  };
+
+  const handleToggle3D = () => {
+    if (!mapInstanceRef.current) return;
+    const curPitch = mapInstanceRef.current.getPitch();
+    const nextPitch = curPitch > 25 ? 0 : 60;
+    mapInstanceRef.current.easeTo({
+      pitch: nextPitch,
+      duration: 800
+    });
+  };
+
+  const handleResetNorth = () => {
+    if (!mapInstanceRef.current) return;
+    mapInstanceRef.current.easeTo({
+      bearing: 0,
+      pitch: 0,
+      duration: 800
+    });
+  };
+
+  const handleRecenterRoute = () => {
+    userInteractedRef.current = false;
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const dLat = destinationMarker?.latitude ?? (destinationMarker as any)?.lat ?? activeVessel?.dest_lat;
+    const dLon = destinationMarker?.longitude ?? (destinationMarker as any)?.lon ?? activeVessel.dest_lon;
+    const vLat = activeVessel?.latitude ?? (activeVessel as any)?.lat;
+    const vLon = activeVessel?.longitude ?? (activeVessel as any)?.lon;
+
+    if (typeof dLat === 'number' && typeof dLon === 'number' && !isNaN(dLat) && !isNaN(dLon) &&
+        typeof vLat === 'number' && typeof vLon === 'number' && !isNaN(vLat) && !isNaN(vLon)) {
+      const minLon = Math.min(vLon, dLon) - 3.5;
+      const maxLon = Math.max(vLon, dLon) + 3.5;
+      const minLat = Math.min(vLat, dLat) - 2;
+      const maxLat = Math.max(vLat, dLat) + 2;
+
+      map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
+        padding: { top: 80, bottom: 100, left: 80, right: 80 },
+        maxZoom: 5.8,
+        duration: 1000
+      });
+    } else if (typeof vLat === 'number' && typeof vLon === 'number') {
+      map.flyTo({ center: [vLon, vLat], zoom: 5.0, duration: 1000, essential: true });
+    }
+  };
+
+  // 1. Initialize MapLibre GL Map (Full 3D Movable Globe Interaction)
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
@@ -621,9 +703,7 @@ export const PolarMap: React.FC<PolarMapProps> = ({
       ? `https://api.maptiler.com/maps/darkmatter/style.json?key=${MAPTILER_API_KEY}`
       : DARK_MATTER_STYLE;
 
-    // Always start centered on Antarctic operational sector (Bransfield Strait / Peninsula)
-    // Do NOT use vessel position here — vessel may be in Indian Ocean (Sagar Nidhi) or Pacific
-    const initialCenter: [number, number] = OPERATIONAL_SECTOR.center; // [lon, lat]
+    const initialCenter: [number, number] = OPERATIONAL_SECTOR.center;
 
     const map = new MapLibreMap({
       container: mapContainerRef.current,
@@ -631,17 +711,34 @@ export const PolarMap: React.FC<PolarMapProps> = ({
       center: initialCenter,
       zoom: OPERATIONAL_SECTOR.zoom,
       minZoom: 1.5,
-      maxZoom: 12,
+      maxZoom: 14,
       attributionControl: false,
-      renderWorldCopies: false,
-      dragRotate: false,
-      pitchWithRotate: false,
-      touchPitch: false,
+      renderWorldCopies: true,   // Allow continuous 360° panning around Antarctica
+      dragRotate: true,          // Right-click or Ctrl+drag to rotate 360° freely
+      pitchWithRotate: true,     // Right-click drag tilts 3D perspective
+      touchPitch: true,          // Touchscreen two-finger 3D tilt
+      maxPitch: 75,              // Dynamic 3D perspective up to 75 degrees
+      bearing: 0,
       fadeDuration: 0,
       trackResize: true
     });
 
+    // Track user manual interaction to prevent disruptive camera snap-backs
+    const onUserInteraction = () => {
+      userInteractedRef.current = true;
+    };
+    map.on('dragstart', onUserInteraction);
+    map.on('rotatestart', onUserInteraction);
+    map.on('pitchstart', onUserInteraction);
+    map.on('wheel', onUserInteraction);
 
+    map.on('rotate', () => {
+      setMapBearing(Math.round(map.getBearing()));
+    });
+
+    map.on('pitch', () => {
+      setMapPitch(Math.round(map.getPitch()));
+    });
 
     map.on('click', () => {
       setSelectedEntityInfo(null);
@@ -666,12 +763,13 @@ export const PolarMap: React.FC<PolarMapProps> = ({
     };
   }, []);
 
-  // 2. Auto-Fit Bounds when Destination or Route changes
+  // 2. Auto-Fit Bounds when Destination or Route changes (Preserves user pan/zoom freedom)
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !mapLoaded) return;
 
     if (focusTarget && Array.isArray(focusTarget) && typeof focusTarget[0] === 'number' && !isNaN(focusTarget[0]) && typeof focusTarget[1] === 'number' && !isNaN(focusTarget[1])) {
+      userInteractedRef.current = false;
       map.flyTo({ center: [focusTarget[1], focusTarget[0]], zoom: 5.2, duration: 1200, essential: true });
       return;
     }
@@ -682,6 +780,14 @@ export const PolarMap: React.FC<PolarMapProps> = ({
     const dLon = destinationMarker?.longitude ?? (destinationMarker as any)?.lon ?? activeVessel?.dest_lon;
     const vLat = activeVessel?.latitude ?? (activeVessel as any)?.lat;
     const vLon = activeVessel?.longitude ?? (activeVessel as any)?.lon;
+
+    const currentTargetKey = `${activeVessel?.id}_${destinationMarker?.name || ''}_${viewportMode}`;
+
+    // If user has manually moved/dragged the map and target hasn't changed, DO NOT snap back
+    if (userInteractedRef.current && lastTargetKeyRef.current === currentTargetKey) {
+      return;
+    }
+    lastTargetKeyRef.current = currentTargetKey;
 
     if (viewportMode === 'OPERATIONAL' && typeof vLat === 'number' && !isNaN(vLat) && typeof vLon === 'number' && !isNaN(vLon)) {
       if (typeof dLat === 'number' && typeof dLon === 'number' && !isNaN(dLat) && !isNaN(dLon)) {
@@ -694,28 +800,24 @@ export const PolarMap: React.FC<PolarMapProps> = ({
           map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
             padding: { top: 70, bottom: 90, left: 70, right: 70 },
             maxZoom: 5.8,
-            duration: 1200
+            duration: 1000
           });
         }
       } else {
         map.flyTo({
           center: [vLon, vLat],
           zoom: 5.0,
-          duration: 1200,
+          duration: 1000,
           essential: true
         });
       }
     }
   }, [
-    destinationMarker, 
+    destinationMarker?.name, 
+    destinationMarker?.latitude, 
+    destinationMarker?.longitude, 
     focusTarget, 
     activeVessel?.id, 
-    activeVessel?.latitude, 
-    activeVessel?.longitude, 
-    activeVessel?.dest_lat,
-    activeVessel?.dest_lon,
-    (activeVessel as any)?.lat, 
-    (activeVessel as any)?.lon, 
     mapLoaded, 
     viewportMode, 
     activeSelectedIcebergId
@@ -861,7 +963,7 @@ export const PolarMap: React.FC<PolarMapProps> = ({
       vesselRoutes.forEach((r) => {
         if (!r.path || r.path.length < 2) return;
         const isSelected = r.id === activeRouteObj?.id || (r.id.endsWith(activeRouteKey));
-        const isRecommended = r.recommended || r.id.includes('route-b');
+        const isRecommended = Boolean(r.recommended);
         
         // Active recommended route is prominent solid #10B981 emerald or #00F2FE cyan.
         // Alternative routes are thinner, dashed, muted #64748B.
@@ -869,7 +971,8 @@ export const PolarMap: React.FC<PolarMapProps> = ({
           ? (isRecommended ? '#10B981' : (r.id.includes('route-c') ? '#00F2FE' : '#F43F5E'))
           : '#64748B';
 
-        const coords = r.path.map((pt: [number, number]) => [pt[1], pt[0]]);
+        const rawCoords = r.path.map((pt: [number, number]) => [pt[1], pt[0]]);
+        const segments = splitAntimeridianLine(rawCoords);
 
         routeFeaturesList.push({
           type: 'Feature',
@@ -887,9 +990,12 @@ export const PolarMap: React.FC<PolarMapProps> = ({
             fuel: r.fuel_estimate || r.fuelConsumption || 'N/A',
             risk: r.iceRisk || 'MODERATE'
           },
-          geometry: {
+          geometry: segments.length > 1 ? {
+            type: 'MultiLineString',
+            coordinates: segments
+          } : {
             type: 'LineString',
-            coordinates: coords
+            coordinates: segments[0] || rawCoords
           }
         });
       });
@@ -1335,8 +1441,9 @@ export const PolarMap: React.FC<PolarMapProps> = ({
         // - Medium zoom (4.2-5.6): Selected AND High-Threat icebergs show compact ID label
         // - High zoom (>=5.6): All icebergs show tactical labels
         const showLabel = isSelected || isZoomHigh || (isZoomMed && isHigh);
+        const velNum = typeof ib.velocity === 'number' ? ib.velocity : (parseFloat(String(ib.velocity)) || 0.4);
         const labelText = (isSelected || isZoomHigh)
-          ? `${ib.id} ${isSelected || isHigh ? `• ${(ib.velocity || 0.4).toFixed(1)}kn` : ''}`
+          ? `${ib.id} ${isSelected || isHigh ? `• ${velNum.toFixed(1)}kn` : ''}`
           : ib.id;
 
         const ibEl = document.createElement('div');
@@ -1682,6 +1789,71 @@ export const PolarMap: React.FC<PolarMapProps> = ({
             </div>
           </div>
         )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 3. 3D GLOBE PERSPECTIVE & INTERACTIVE NAVIGATION DOCK                     */}
+      {/* ========================================================================= */}
+      <div className="absolute top-14 right-3 z-30 flex flex-col items-center gap-1.5 font-mono text-xs select-none">
+        {/* 3D Perspective Toggle */}
+        <button
+          type="button"
+          onClick={handleToggle3D}
+          className={`w-9 h-9 rounded-lg border backdrop-blur-md shadow-xl flex flex-col items-center justify-center transition-all ${
+            mapPitch > 25
+              ? 'bg-cyan-500/25 border-cyan-400 text-cyan-300 shadow-[0_0_12px_rgba(0,242,254,0.4)]'
+              : 'bg-[#040B16]/95 border-slate-700/80 text-slate-300 hover:text-white hover:border-cyan-500/60'
+          }`}
+          title={mapPitch > 25 ? 'Switch to 2D Overhead View' : 'Switch to 3D Globe Perspective (Hold Right-Click / Ctrl to Tilt)'}
+        >
+          <Eye className="w-4 h-4 text-cyan-400" />
+          <span className="text-[8px] font-bold mt-0.5">{mapPitch > 25 ? '3D' : '2D'}</span>
+        </button>
+
+        {/* Compass / Reset North */}
+        <button
+          type="button"
+          onClick={handleResetNorth}
+          className="w-9 h-9 rounded-lg border bg-[#040B16]/95 border-slate-700/80 text-slate-300 hover:text-cyan-300 hover:border-cyan-500/60 backdrop-blur-md shadow-xl flex flex-col items-center justify-center transition-all"
+          title="Reset Bearing & North"
+        >
+          <Compass
+            className="w-4 h-4 text-cyan-400 transition-transform duration-300"
+            style={{ transform: `rotate(${-mapBearing}deg)` }}
+          />
+          <span className="text-[8px] font-bold mt-0.5">N</span>
+        </button>
+
+        {/* Recenter Voyage Corridor */}
+        <button
+          type="button"
+          onClick={handleRecenterRoute}
+          className="w-9 h-9 rounded-lg border bg-[#040B16]/95 border-slate-700/80 text-slate-300 hover:text-cyan-300 hover:border-cyan-500/60 backdrop-blur-md shadow-xl flex flex-col items-center justify-center transition-all"
+          title="Recenter Active Voyage Corridor"
+        >
+          <Crosshair className="w-4 h-4 text-cyan-400" />
+          <span className="text-[8px] font-bold mt-0.5">FIT</span>
+        </button>
+
+        {/* Zoom Controls */}
+        <div className="flex flex-col rounded-lg border border-slate-700/80 bg-[#040B16]/95 backdrop-blur-md shadow-xl overflow-hidden mt-0.5">
+          <button
+            type="button"
+            onClick={handleZoomIn}
+            className="w-9 h-8 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors border-b border-slate-800"
+            title="Zoom In (+)"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleZoomOut}
+            className="w-9 h-8 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800/60 transition-colors"
+            title="Zoom Out (-)"
+          >
+            <Minus className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
 

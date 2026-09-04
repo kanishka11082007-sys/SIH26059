@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  CheckCircle2, Ship, MapPin, Sparkles, ShieldAlert, Zap
+  CheckCircle2, Ship, MapPin, Sparkles, ShieldAlert, Zap,
+  PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from "../../hooks/useApiData";
 import { useFleet } from '../../context/FleetContext';
 import PolarMap from '../../components/map/PolarMap';
 import { GeminiCopilotDrawer } from '../../components/GeminiCopilotDrawer';
+import { TacticalHazardBanner } from '../../components/TacticalHazardBanner';
 import { api } from '../../services/api';
 import { cn } from '../../utils/cn';
 
@@ -45,12 +47,8 @@ export const RouteOptimizationPage: React.FC = () => {
     routes,
     activeRouteId,
     setActiveRouteId,
-    activeRoute,
-    missionId,
-    missionType,
-    setMissionType,
     emergencyRerouteActive,
-    setEmergencyRerouteActive,
+    triggerEmergencyHazard,
     whatIfScenario,
     setWhatIfScenario
   } = useFleet();
@@ -58,6 +56,7 @@ export const RouteOptimizationPage: React.FC = () => {
   const [selectedRouteId, setSelectedRouteId] = useState<string>('route-b');
   const [bharatiValidation, setBharatiValidation] = useState<any>(null);
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
 
   useEffect(() => {
     async function loadValidation() {
@@ -117,8 +116,13 @@ export const RouteOptimizationPage: React.FC = () => {
       }
     >
       <div className="flex flex-col lg:flex-row h-full overflow-hidden bg-navy">
-        {/* Left Side: Clean Control & Corridor Panel */}
-        <div className="w-full lg:w-96 xl:w-[410px] border-r border-slate/20 bg-navy/95 backdrop-blur-md overflow-y-auto custom-scrollbar p-5 space-y-5 flex flex-col justify-between shrink-0">
+        {/* Left Side: Collapsible Control & Corridor Panel */}
+        <div className={cn(
+          "border-r border-slate/20 bg-navy/95 backdrop-blur-md overflow-y-auto custom-scrollbar flex flex-col justify-between shrink-0 transition-all duration-300 ease-in-out",
+          isSidebarOpen 
+            ? "w-full lg:w-96 xl:w-[410px] p-5 opacity-100" 
+            : "w-0 p-0 border-none opacity-0 overflow-hidden"
+        )}>
           
           <div className="space-y-4">
             {/* Mission Configuration */}
@@ -169,16 +173,16 @@ export const RouteOptimizationPage: React.FC = () => {
               <div className="pt-2 space-y-1.5 border-t border-slate/20">
                 <button
                   type="button"
-                  onClick={() => setEmergencyRerouteActive(!emergencyRerouteActive)}
+                  onClick={triggerEmergencyHazard}
                   className={cn(
-                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border",
+                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
                     emergencyRerouteActive
-                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral animate-pulse"
-                      : "bg-polar-navy/40 border-slate/30 text-slate-300 hover:text-white"
+                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral animate-pulse shadow-[0_0_15px_rgba(255,107,94,0.3)]"
+                      : "bg-polar-navy/40 border-slate/30 text-slate-300 hover:text-white hover:border-glacial-blue"
                   )}
                 >
                   <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>{emergencyRerouteActive ? "EMERGENCY DIVERSION ACTIVE" : "SIMULATE HAZARD / EMERGENCY"}</span>
+                  <span>{emergencyRerouteActive ? "TACTICAL DIVERSION ACTIVE" : "SIMULATE HAZARD / EMERGENCY"}</span>
                 </button>
 
                 <button
@@ -377,7 +381,30 @@ export const RouteOptimizationPage: React.FC = () => {
         </div>
 
         {/* Right Side: Polar Map Canvas */}
-        <div className="flex-1 relative h-full bg-[#030910]">
+        <div className="flex-1 relative h-full bg-[#030910] overflow-hidden">
+          {/* Floating Sidebar Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-md bg-[#030d1a]/90 hover:bg-[#081e36] border border-slate/30 text-ice-white hover:text-glacial-blue text-xs font-mono flex items-center gap-1.5 shadow-lg backdrop-blur-md cursor-pointer transition-all"
+            title={isSidebarOpen ? "Hide sidebar (full map view)" : "Show route controls"}
+          >
+            {isSidebarOpen ? (
+              <>
+                <PanelLeftClose className="w-3.5 h-3.5 text-glacial-blue" />
+                <span className="text-[11px] hidden sm:inline">Hide Sidebar</span>
+              </>
+            ) : (
+              <>
+                <PanelLeftOpen className="w-3.5 h-3.5 text-glacial-blue" />
+                <span className="text-[11px] font-semibold text-glacial-blue">Route Controls</span>
+              </>
+            )}
+          </button>
+
+          {/* Compact Floating HUD Tactical Hazard Alert */}
+          <TacticalHazardBanner className="absolute top-3 left-1/2 -translate-x-1/2 z-50 max-w-xl w-full px-3 pointer-events-auto" />
+
           <PolarMap
             section="navigation"
             showRoute={true}
