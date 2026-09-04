@@ -380,7 +380,7 @@ const MISSION_TYPE_KEY = 'polarnav_mission_type';
 
 export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [fleet, setFleet] = useState<CanonicalVessel[]>(CANONICAL_FLEET);
-  const [stations] = useState<AntarcticStation[]>(CANONICAL_STATIONS);
+  const [stations, setStations] = useState<AntarcticStation[]>(CANONICAL_STATIONS);
   const [selectedVesselId, setSelectedVesselIdState] = useState<string>(() => {
     return localStorage.getItem(STORAGE_KEY) || 'rv_sagar_nidhi';
   });
@@ -440,11 +440,32 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem(MISSION_TYPE_KEY, type);
   }, []);
 
+  // Fetch live stations from backend, fallback to CANONICAL_STATIONS
+  useEffect(() => {
+    api.stations().then((res) => {
+      if (res?.stations?.length) {
+        const normalized: AntarcticStation[] = res.stations.map((s: any) => ({
+          id: s.id || s.station_id || s.name?.toLowerCase().replace(/\s+/g, '_'),
+          name: s.name || s.station_name,
+          latitude: Number(s.latitude || s.lat),
+          longitude: Number(s.longitude || s.lon),
+          region: s.region || s.sub_region || '',
+          operator: s.operator || s.country || '',
+          country: s.country || '',
+          coastal_access: s.coastal_access ?? true
+        })).filter((s: AntarcticStation) => s.id && !isNaN(s.latitude) && !isNaN(s.longitude));
+        if (normalized.length > 0) {
+          setStations(normalized);
+        }
+      }
+    }).catch(() => { /* keep CANONICAL_STATIONS as fallback */ });
+  }, []);
+
   // Fetch canonical fleet from backend
   const refreshFleet = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await api.fleet();
+      const res = await api.vessels();
       if (res?.vessels?.length) {
         const normalized: CanonicalVessel[] = res.vessels.map((v: any) => ({
           id: v.id || String(v.mmsi),
