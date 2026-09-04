@@ -27,7 +27,7 @@ except Exception:
 logger = logging.getLogger("polarnav.copilot")
 
 # Configurable defaults
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 
 
 
@@ -164,10 +164,11 @@ class GeminiProvider(LLMProvider):
             f"USER QUESTION / PROMPT: {question or 'Explain why this route was selected, how risks were mitigated, and the key operational tradeoffs.'}"
         )
 
-        # Gemini REST generateContent endpoint with graceful fallbacks
+        # Gemini REST generateContent endpoint with low-latency candidate models
         models_to_try = [self.model_name]
-        if "gemini-flash-lite-latest" not in models_to_try:
-            models_to_try.append("gemini-flash-lite-latest")
+        for candidate in ["gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.6-flash"]:
+            if candidate not in models_to_try:
+                models_to_try.append(candidate)
 
         last_error = None
         for mod in models_to_try:
@@ -192,7 +193,7 @@ class GeminiProvider(LLMProvider):
                     url,
                     headers={"Content-Type": "application/json"},
                     json=payload,
-                    timeout=25.0
+                    timeout=8.0
                 )
                 elapsed_ms = round((time.time() - t0) * 1000, 1)
 
