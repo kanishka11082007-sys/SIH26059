@@ -6,7 +6,6 @@
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%2F%20TypeScript-61DAFB.svg)](https://react.dev)
 [![MapLibre](https://img.shields.io/badge/GIS-MapLibre%20GL%20%2B%20deck.gl-blueviolet.svg)](https://maplibre.org)
 [![PostgreSQL](https://img.shields.io/badge/Database-Supabase%20%2F%20PostgreSQL-336791.svg)](https://supabase.com)
-[![Docker](https://img.shields.io/badge/Deployment-Docker%20%26%20Compose-2496ED.svg)](https://docker.com)
 
 **PolarNav** is an autonomous maritime decision support system engineered for polar research vessels navigating Antarctic waters. It delivers real-time ice-aware voyage planning, dynamic multi-objective routing across 7 environmental cost surfaces, kinematic iceberg drift forecasting, and automated IMO POLARIS Risk Index Outcome (RIO) compliance reporting.
 
@@ -37,28 +36,13 @@
 
 ---
 
-## Quickstart
+## Quickstart & Local Setup
 
-### Option 1: Docker Compose (Recommended)
-Clone the repository and launch the full stack with one command:
-```bash
-# 1. Clone repo
-git clone https://github.com/your-org/polarnav.git
-cd polarnav
+### Quick Launch (Windows / Linux)
+- **Windows**: Double-click [start.bat](file:///d:/SIH/start.bat)
+- **Linux/macOS**: Run `./start.sh`
 
-# 2. Configure environment
-cp .env.example .env
-
-# 3. Launch with Docker Compose
-docker compose up --build
-```
-- Frontend UI: `http://localhost:3000`
-- Backend API: `http://localhost:8000`
-- Interactive API Docs: `http://localhost:8000/docs`
-
----
-
-### Option 2: Local Development Setup
+### Manual Step-by-Step
 
 #### Prerequisites
 - Python 3.11+
@@ -79,16 +63,6 @@ python -m backend.app.seed_db
 python -m uvicorn backend.app.server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-#### Build & Push Backend with Docker:
-```bash
-# Build backend image directly using the unified backend directory
-docker build -t polarnav-backend ./backend
-
-# Tag and push to your container registry (Docker Hub / GHCR)
-docker tag polarnav-backend yourusername/polarnav-backend:latest
-docker push yourusername/polarnav-backend:latest
-```
-
 #### 2. Frontend Setup
 ```powershell
 cd SIH26059\frontend
@@ -96,19 +70,13 @@ npm install
 npm run dev
 ```
 
+- Frontend UI: `http://localhost:3000`
+- Backend API: `http://localhost:8000`
+- Interactive API Docs: `http://localhost:8000/docs`
+
 ---
 
-## Cloud Deployment Guide
-
-### Single-Container Deployment (Render / Railway / Fly.io / AWS App Runner)
-The unified [Dockerfile](file:///D:/SIH/Dockerfile) uses a multi-stage build that compiles the React frontend and serves both the API and the SPA from FastAPI on port `8000`:
-1. Connect your GitHub repository to your cloud provider.
-2. Select **Docker** deployment mode.
-3. Set the build context to root (`.`) and Dockerfile path to `Dockerfile`.
-4. Add your `DATABASE_URL` environment variable.
-5. Deploy!
-
-### Database Setup (Supabase)
+## Database Setup (Supabase)
 1. Create a free project on [Supabase](https://supabase.com).
 2. Copy your connection URI from **Project Settings $\to$ Database $\to$ Connection string (URI)**.
 3. Paste it into your `.env`:

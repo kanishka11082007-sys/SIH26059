@@ -737,7 +737,42 @@ def api_bathymetry(lat: float = Query(-65.0), lon: float = Query(-64.0)):
 
 
 # =============================================================================
-# 9. HEALTH & DIAGNOSTICS
+# 9. AI NAVIGATION COPILOT (GEMINI & DETERMINISTIC EXPLANATION LAYER)
+# =============================================================================
+
+@app.post("/api/copilot")
+def api_copilot_explain(payload: dict):
+    """Phase 12, 13, 14: Explainable AI Navigation Copilot.
+    
+    Generates an authoritative natural-language explanation of a structured
+    maritime navigation decision (IMO POLARIS RIO, iceberg margin, fuel, sea ice).
+    Strictly grounded on computed facts. Zero API key leakage.
+    """
+    try:
+        from backend.services.copilot_service import copilot_service
+    except ImportError:
+        from services.copilot_service import copilot_service
+
+    decision_data = payload.get("decision_data") or payload.get("decision") or payload
+    question = payload.get("question") or payload.get("prompt")
+    return copilot_service.explain(decision_data=decision_data, question=question)
+
+
+@app.get("/api/copilot/status")
+def api_copilot_status():
+    """Health & authentication status probe for AI Copilot (Zero key exposure)."""
+    has_key = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    return {
+        "status": "ONLINE",
+        "active_provider": "gemini" if has_key else "deterministic_fallback",
+        "gemini_authenticated": has_key,
+        "model": os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"),
+        "security": "PROTECTED_BACKEND_ONLY"
+    }
+
+
+# =============================================================================
+# 10. HEALTH & DIAGNOSTICS
 # =============================================================================
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])

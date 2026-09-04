@@ -28,6 +28,27 @@ export async function apiFetch<T>(endpoint: string): Promise<T | null> {
   }
 }
 
+export async function apiPost<T>(endpoint: string, body: any): Promise<T | null> {
+  try {
+    const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    const url = API_BASE + cleanEndpoint;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      console.warn(`[PolarNav API POST] HTTP ${res.status} for ${url}`);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn(`[PolarNav API POST] Connection error for ${endpoint}:`, err);
+    return null;
+  }
+}
+
+
 export const api = {
   health: () => apiFetch<{status: string}>("/health"),
   vessels: () => apiFetch<{vessels: any[]}>("/vessels"),
@@ -102,5 +123,8 @@ export const api = {
   bathymetry: (lat: number = -65.0, lon: number = -64.0) => apiFetch<any>(`/bathymetry?lat=${lat}&lon=${lon}`),
   intelligenceModels: () => apiFetch<any>("/intelligence/models"),
   dbStatus: () => apiFetch<any>("/db/status"),
+  copilotStatus: () => apiFetch<{status: string; active_provider: string; gemini_authenticated: boolean; model: string}>("/copilot/status"),
+  copilot: (decisionData: any, question?: string) => apiPost<any>("/copilot", { decision_data: decisionData, question }),
 };
+
 
