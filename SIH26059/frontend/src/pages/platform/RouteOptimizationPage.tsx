@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  CheckCircle2, Ship, MapPin
+  CheckCircle2, Ship, MapPin, Sparkles
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from "../../hooks/useApiData";
 import { useFleet } from '../../context/FleetContext';
 import PolarMap from '../../components/map/PolarMap';
+import { GeminiCopilotDrawer } from '../../components/GeminiCopilotDrawer';
 import { api } from '../../services/api';
 import { cn } from '../../utils/cn';
 
@@ -46,6 +47,7 @@ export const RouteOptimizationPage: React.FC = () => {
   const [routes, setRoutes] = useState<RouteOption[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string>('route-b');
   const [bharatiValidation, setBharatiValidation] = useState<any>(null);
+  const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
 
   // Load Real COMNAP Antarctic Research Stations from API
   useEffect(() => {
@@ -155,9 +157,19 @@ export const RouteOptimizationPage: React.FC = () => {
       title="Route Optimization"
       subtitle="Multi-objective polar navigation corridors"
       actions={
-        <div className="flex items-center gap-2 text-xs font-mono bg-polar-navy/40 border border-slate/20 px-3 py-1 rounded-sm">
-          <span className="text-slate-400">ACTIVE:</span>
-          <span className="text-risk-safe font-semibold">{routes.find(r => r.id === activeRouteId)?.name?.split(' - ')[0] || 'ROUTE B'}</span>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 text-xs font-mono bg-polar-navy/40 border border-slate/20 px-3 py-1 rounded-sm">
+            <span className="text-slate-400">ACTIVE:</span>
+            <span className="text-risk-safe font-semibold">{routes.find(r => r.id === activeRouteId)?.name?.split(' - ')[0] || 'ROUTE B'}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsCopilotOpen(true)}
+            className="flex items-center gap-1.5 text-xs font-mono bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-400/60 px-3 py-1 rounded-sm text-cyan-300 font-semibold shadow-[0_0_12px_rgba(34,211,238,0.25)] transition-all cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+            <span>Gemini AI Copilot</span>
+          </button>
         </div>
       }
     >
@@ -369,6 +381,15 @@ export const RouteOptimizationPage: React.FC = () => {
                       <span>Engage This Corridor</span>
                     )}
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsCopilotOpen(true)}
+                    className="w-full py-2 rounded-sm text-xs font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 mt-2 bg-gradient-to-r from-cyan-950 to-blue-950 hover:from-cyan-900 hover:to-blue-900 border border-cyan-500/50 text-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.15)] cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Ask Gemini Copilot About Route</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -411,6 +432,29 @@ export const RouteOptimizationPage: React.FC = () => {
           />
         </div>
       </div>
+
+      <GeminiCopilotDrawer
+        isOpen={isCopilotOpen}
+        onClose={() => setIsCopilotOpen(false)}
+        decisionContext={{
+          vessel: {
+            name: activeVessel.name,
+            polar_class: activeVessel.polar_class,
+            destination: activeDestination.name,
+            speed: activeVessel.speed
+          },
+          route: selectedRoute ? {
+            id: selectedRoute.id,
+            name: selectedRoute.name,
+            distance: selectedRoute.distance,
+            eta: selectedRoute.eta,
+            fuelConsumption: selectedRoute.fuelConsumption,
+            rioScore: selectedRoute.rioScore,
+            sicExposure: selectedRoute.sicExposure,
+            reason: selectedRoute.reason
+          } : undefined
+        }}
+      />
     </AppShell>
   );
 };

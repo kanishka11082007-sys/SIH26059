@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  Loader2, Download, Zap, Ship, MapPin
+  Loader2, Download, Zap, Ship, MapPin, Sparkles
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from '../../hooks/useApiData';
 import { useFleet } from '../../context/FleetContext';
+import { GeminiCopilotDrawer } from '../../components/GeminiCopilotDrawer';
 import { api } from '../../services/api';
 import { cn } from '../../utils/cn';
 import PolarMap from '../../components/map/PolarMap';
@@ -227,6 +228,7 @@ export const NavigationPage: React.FC = () => {
 
   const [localRoutes, setLocalRoutes] = useState<RouteOption[]>([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
 
   // Live iceberg data
   const [icebergs, setIcebergs] = useState<any[]>([]);
@@ -458,6 +460,14 @@ export const NavigationPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => setIsCopilotOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-sm bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-400/60 text-xs font-mono text-cyan-300 font-semibold shadow-[0_0_12px_rgba(34,211,238,0.25)] transition-all cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+            <span>Gemini AI Copilot</span>
+          </button>
+          <button
+            type="button"
             onClick={handleExportPlan}
             className="flex items-center gap-1.5 px-3 py-1 rounded-sm bg-polar-navy/40 hover:bg-polar-navy border border-slate/20 text-xs font-mono text-ice-white transition-all"
           >
@@ -678,6 +688,29 @@ export const NavigationPage: React.FC = () => {
           />
         </div>
       </div>
+
+      <GeminiCopilotDrawer
+        isOpen={isCopilotOpen}
+        onClose={() => setIsCopilotOpen(false)}
+        decisionContext={{
+          vessel: {
+            name: selectedVessel?.name,
+            polar_class: selectedVessel?.polar_class,
+            destination: selectedDestination?.name,
+            speed: cruisingSpeed
+          },
+          route: activeRoute ? {
+            id: activeRoute.id,
+            name: activeRoute.name,
+            distance: activeRoute.distance,
+            eta: activeRoute.eta,
+            fuelConsumption: activeRoute.fuelConsumption,
+            rioScore: activeRoute.rioScore,
+            sicExposure: activeRoute.sicExposure,
+            reason: activeRoute.reason
+          } : undefined
+        }}
+      />
     </AppShell>
   );
 };
