@@ -93,6 +93,8 @@ class PolarRoutingEngine:
         self._sic_tree: Optional[KDTree] = None
         self._sic_values: Optional[np.ndarray] = None
         self._icebergs_cache: List[Dict[str, Any]] = []
+        self._iceberg_tree_3031: Optional[KDTree] = None
+        self._iceberg_coords_3031: Optional[np.ndarray] = None
         self._env_timesteps: List[Dict[str, Any]] = []
         self._initialized = False
 
@@ -148,6 +150,20 @@ class PolarRoutingEngine:
                     self._icebergs_cache = ib_data.get("icebergs", [])
                     logger.info(f"Loaded {len(self._icebergs_cache)} tracked icebergs with forecast trajectories from {ip}.")
                     break
+
+        # Build high-performance metric EPSG:3031 spatial KDTree for immediate O(log N) iceberg collision lookups
+        if self._icebergs_cache:
+            ib_pts_3031 = []
+            for ib in self._icebergs_cache:
+                c_lat = float(ib.get("current_lat", ib.get("latitude", 0.0)) or 0.0)
+                c_lon = float(ib.get("current_lon", ib.get("longitude", 0.0)) or 0.0)
+                ix, iy = TRANS_TO_3031.transform(c_lon, c_lat)
+                ib["x_3031"] = ix
+                ib["y_3031"] = iy
+                ib_pts_3031.append((ix, iy))
+            if ib_pts_3031:
+                self._iceberg_tree_3031 = KDTree(np.array(ib_pts_3031))
+                self._iceberg_coords_3031 = np.array(ib_pts_3031)
 
         # 4. Load Environmental Timesteps
         env_path = PROCESSED_DIR / "environmental_timesteps.json"
@@ -206,8 +222,10 @@ class PolarRoutingEngine:
         self,
         lon: float,
         lat: float,
-        time_hours: float,
-        safety_clearance_km: float = 15.0
+        time_hours: float = 0.0,
+        safety_clearance_km: float = 15.0,
+        x_3031: Optional[float] = None,
+        y_3031: Optional[float] = None
     ) -> Tuple[float, float, Optional[str]]:
         """Calculate time-dependent Closest Point of Approach (CPA) and collision risk.
 
@@ -216,6 +234,16 @@ class PolarRoutingEngine:
         """
         if not self._icebergs_cache:
             return 999.0, 0.0, None
+
+        # Ultra-fast O(log N) metric KDTree query for static/A* route evaluations (99% of queries)
+        if time_hours == 0.0 and self._iceberg_tree_3031 is not None:
+            if x_3031 is None or y_3031 is None:
+                x_3031, y_3031 = TRANS_TO_3031.transform(lon, lat)
+            dist_m, idx = self._iceberg_tree_3031.query([x_3031, y_3031])
+            dist_km = dist_m / 1000.0
+            risk = math.exp(-0.5 * (dist_km / (safety_clearance_km * 0.4)) ** 2) * 25.0 if dist_km < safety_clearance_km else 0.0
+            closest_id = self._icebergs_cache[idx].get("id") if idx < len(self._icebergs_cache) else None
+            return dist_km, risk, closest_id
 
         min_dist_km = 999.0
         closest_id = None
@@ -357,7 +385,7 @@ class PolarRoutingEngine:
             raw_sic = self.get_sic(lon, lat)
             sic_penalty = 1.0 + ((raw_sic / 100.0) ** 2) * w_sic * 2.5
 
-            min_cpa, ib_risk, _ = self.get_iceberg_cpa_and_risk(lon, lat, time_hours=0.0, safety_clearance_km=clearance_km)
+            min_cpa, ib_risk, _ = self.get_iceberg_cpa_and_risk(lon, lat, time_hours=0.0, safety_clearance_km=clearance_km, x_3031=x, y_3031=y)
             if min_cpa < clearance_km * 0.4:
                 ib_penalty = 15.0
             elif min_cpa < clearance_km:
@@ -405,10 +433,13 @@ class PolarRoutingEngine:
             for ddx, ddy in dirs:
                 ngx, ngy = cgx + ddx, cgy + ddy
                 if 0 <= ngx < nx and 0 <= ngy < ny:
+                    step_base = step * (1.4142 if ddx != 0 and ddy != 0 else 1.0)
+                    if cur_g + step_base >= g_score.get((ngx, ngy), float('inf')):
+                        continue
                     cell_mult = eval_cell_cost(ngx, ngy)
                     if math.isinf(cell_mult):
                         continue
-                    step_dist = step * (1.4142 if ddx != 0 and ddy != 0 else 1.0) * cell_mult
+                    step_dist = step_base * cell_mult
                     tentative_g = cur_g + step_dist
                     if tentative_g < g_score.get((ngx, ngy), float('inf')):
                         g_score[(ngx, ngy)] = tentative_g

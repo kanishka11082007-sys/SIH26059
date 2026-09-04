@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   CheckCircle2, Ship, MapPin, Sparkles, ShieldAlert, Zap,
-  PanelLeftClose, PanelLeftOpen
+  PanelLeftClose, PanelLeftOpen, Navigation, Loader2
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from "../../hooks/useApiData";
@@ -50,13 +50,19 @@ export const RouteOptimizationPage: React.FC = () => {
     emergencyRerouteActive,
     triggerEmergencyHazard,
     whatIfScenario,
-    setWhatIfScenario
+    setWhatIfScenario,
+    setCustomDestination,
+    isComputingRoutes
   } = useFleet();
 
   const [selectedRouteId, setSelectedRouteId] = useState<string>('route-b');
   const [bharatiValidation, setBharatiValidation] = useState<any>(null);
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
+  const [customName, setCustomName] = useState<string>('');
+  const [customLat, setCustomLat] = useState<string>('');
+  const [customLon, setCustomLon] = useState<string>('');
 
   useEffect(() => {
     async function loadValidation() {
@@ -152,21 +158,125 @@ export const RouteOptimizationPage: React.FC = () => {
 
               {/* Destination Selector */}
               <div>
-                <label className="text-[10px] text-slate-300 font-mono block mb-1.5 flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-glacial-blue" />
-                  <span>Destination Station</span>
-                </label>
-                <select
-                  value={selectedDestinationId}
-                  onChange={(e) => setSelectedDestinationId(e.target.value)}
-                  className="w-full bg-polar-navy/50 border border-slate/30 rounded-sm p-2 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue font-medium"
-                >
-                  {stations.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} ({d.country || 'Antarctica'})
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] text-slate-300 font-mono flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-glacial-blue" />
+                    <span>Destination Target</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomMode(!isCustomMode)}
+                    className="text-[10px] text-glacial-blue hover:text-white font-mono transition-colors cursor-pointer"
+                  >
+                    {isCustomMode ? '← Pick Station' : '+ Custom Location'}
+                  </button>
+                </div>
+
+                {!isCustomMode ? (
+                  <select
+                    value={selectedDestinationId}
+                    onChange={(e) => setSelectedDestinationId(e.target.value)}
+                    className="w-full bg-polar-navy/50 border border-slate/30 rounded-sm p-2 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue font-medium"
+                  >
+                    {stations.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.country || 'Antarctica'})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="space-y-2 bg-polar-navy/40 p-2.5 rounded-sm border border-slate/30">
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Location / Waypoint Name"
+                        value={customName}
+                        onChange={(e) => setCustomName(e.target.value)}
+                        className="w-full bg-navy/80 border border-slate/30 rounded-sm p-1.5 text-xs text-ice-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-glacial-blue"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[9px] text-slate-400 font-mono block mb-0.5">Latitude (°S)</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="-69.40"
+                          value={customLat}
+                          onChange={(e) => setCustomLat(e.target.value)}
+                          className="w-full bg-navy/80 border border-slate/30 rounded-sm p-1.5 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-400 font-mono block mb-0.5">Longitude (°E/W)</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="76.19"
+                          value={customLon}
+                          onChange={(e) => setCustomLon(e.target.value)}
+                          className="w-full bg-navy/80 border border-slate/30 rounded-sm p-1.5 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      <span className="text-[9px] text-slate-400 font-mono w-full">Presets:</span>
+                      {[
+                        { label: 'Weddell Sea', lat: -71.5, lon: -40.2 },
+                        { label: 'Ross Shelf', lat: -78.2, lon: 175.0 },
+                        { label: 'Prydz Bay', lat: -68.2, lon: 74.5 },
+                        { label: 'Amundsen', lat: -72.0, lon: -110.0 }
+                      ].map(p => (
+                        <button
+                          key={p.label}
+                          type="button"
+                          onClick={() => {
+                            setCustomName(p.label);
+                            setCustomLat(String(p.lat));
+                            setCustomLon(String(p.lon));
+                          }}
+                          className="text-[9px] font-mono px-1.5 py-0.5 bg-polar-navy/60 hover:bg-glacial-blue/20 hover:text-ice-white border border-slate/30 rounded-xs text-slate-300 transition-colors cursor-pointer"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isComputingRoutes || !customLat || !customLon}
+                      onClick={() => {
+                        const lat = parseFloat(customLat);
+                        const lon = parseFloat(customLon);
+                        if (!isNaN(lat) && !isNaN(lon)) {
+                          setCustomDestination(customName || 'Custom Target', lat, lon);
+                          setIsCustomMode(false);
+                        }
+                      }}
+                      className="w-full py-1.5 px-3 bg-glacial-blue/20 hover:bg-glacial-blue/30 border border-glacial-blue text-ice-white rounded-sm text-xs font-mono font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {isComputingRoutes ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-glacial-blue" />
+                          <span>Computing Corridors...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Navigation className="w-3.5 h-3.5 text-glacial-blue" />
+                          <span>Compute Route to Location</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {isComputingRoutes && (
+                  <div className="flex items-center gap-2 mt-2 px-2.5 py-1.5 bg-glacial-blue/10 border border-glacial-blue/30 rounded-sm text-[11px] font-mono text-glacial-blue animate-pulse">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    <span>Calculating Pareto polar corridors...</span>
+                  </div>
+                )}
               </div>
 
               {/* Tactical Emergency Diversion & What-If Controls */}

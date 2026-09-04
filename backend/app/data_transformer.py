@@ -703,12 +703,22 @@ def get_routes(vessel_id=None, dest_id=None, dest_lat=None, dest_lon=None, dest_
 
 def _prewarm_canonical_routes():
     """Background worker that pre-populates routes for instant zero-latency page loads."""
-    try:
-        # Pre-warm flagship vessel Sagar Nidhi to Bharati, Maitri, and McMurdo
-        get_routes(vessel_id="rv_sagar_nidhi", dest_id="bharati")
-        get_routes(vessel_id="rv_sagar_nidhi", dest_id="maitri")
-    except Exception as e:
-        pass
+    priority_pairs = [
+        ("rv_sagar_nidhi", "bharati"),
+        ("rv_sagar_nidhi", "maitri"),
+        ("rv_polarstern", "neumayer_iii"),
+        ("rrs_sir_david_attenborough", "palmer"),
+        ("rv_sagar_nidhi", "mcmurdo"),
+        ("rv_sagar_nidhi", "rothera"),
+        ("rv_sagar_nidhi", "casey"),
+        ("rv_sagar_nidhi", "davis"),
+        ("rv_sagar_nidhi", "comandante_ferraz"),
+    ]
+    for v_id, d_id in priority_pairs:
+        try:
+            get_routes(vessel_id=v_id, dest_id=d_id)
+        except Exception:
+            pass
 
 # Start asynchronous background pre-warming
 threading.Thread(target=_prewarm_canonical_routes, daemon=True).start()

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Loader2, Download, Zap, Ship, MapPin, Sparkles, ShieldAlert,
-  PanelLeftClose, PanelLeftOpen
+  PanelLeftClose, PanelLeftOpen, Navigation
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from '../../hooks/useApiData';
@@ -44,31 +44,41 @@ const computeHeading = (p1: [number, number], p2: [number, number]): number => {
   const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
   return Math.round((Math.atan2(y, x) * 180 / Math.PI + 360) % 360);
 };
-// Helper to build realistic geodesic waypoints strictly along the active route line
+// Helper to build realistic geodesic waypoints strictly along the active route line
 const generateWaypointsForRoute = (routePath: [number, number][], routeType: string, _destName: string): Waypoint[] => {
   if (!routePath || routePath.length <= 2) return [];
   
-  // Pick only intermediate turning waypoints (exclude start node and terminal arrival)
-  const intermediates = routePath.slice(1, -1);
-  if (intermediates.length === 0) return [];
-  
-  const step = Math.max(1, Math.floor(intermediates.length / 4));
-  const sampled = intermediates.filter((_, i) => i % step === 0).slice(0, 4);
+  const step = Math.max(1, Math.floor(routePath.length / 6));
+  const selectedIdx = [0];
+  for (let i = step; i < routePath.length - 1; i += step) {
+    selectedIdx.push(i);
+  }
+  selectedIdx.push(routePath.length - 1);
 
-  return sampled.map((pt, idx) => {
-    const frac = (idx + 1) / (sampled.length + 1);
-    const dist = Math.round(frac * 4120);
+  let cumDist = 0;
+  return selectedIdx.map((idx, i) => {
+    const pt = routePath[idx];
+    if (i > 0) {
+      const prev = routePath[selectedIdx[i - 1]];
+      const dlat = (pt[0] - prev[0]) * Math.PI / 180;
+      const dlon = (pt[1] - prev[1]) * Math.PI / 180;
+      const a = Math.sin(dlat / 2) ** 2 + Math.cos(prev[0] * Math.PI / 180) * Math.cos(pt[0] * Math.PI / 180) * Math.sin(dlon / 2) ** 2;
+      cumDist += 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+    }
+    const isFirst = i === 0;
+    const isLast = i === selectedIdx.length - 1;
+    const wpNum = i;
 
     return {
-      id: `WP-${String(idx + 1).padStart(2, '0')}`,
-      name: `Corridor Turning Point ${idx + 1}`,
+      id: isFirst ? 'WP-ORIGIN' : isLast ? 'WP-BERTH' : `WP-${String(wpNum).padStart(2, '0')}`,
+      name: isFirst ? 'VOYAGE DEPARTURE' : isLast ? 'STATION MOORING' : `TRANSIT CORRIDOR ${wpNum}`,
       latitude: pt[0],
       longitude: pt[1],
-      distanceFromStart: dist,
-      eta: `T+${(idx + 1) * 6}h`,
-      status: idx === 0 ? 'active' : 'upcoming',
-      iceRisk: idx >= 1 ? (routeType === 'route-a' ? 'HIGH' : routeType === 'route-b' ? 'MODERATE' : 'LOW') : 'LOW',
-      reason: 'Course alignment and ice lead clearance'
+      distanceFromStart: Math.round(cumDist),
+      eta: isFirst ? '00:00' : `+${Math.round(cumDist / (14.0 * 1.852))}h`,
+      status: isFirst ? 'passed' : i === 1 ? 'active' : 'upcoming',
+      iceRisk: isFirst || isLast ? 'LOW' : routeType.includes('route-a') ? 'HIGH' : routeType.includes('route-c') ? 'LOW' : 'MODERATE',
+      reason: isFirst ? 'Convoy departure point' : isLast ? 'Mooring berth approach' : 'Navigation corridor waypoint'
     };
   });
 };
@@ -95,12 +105,18 @@ export const NavigationPage: React.FC = () => {
     whatIfScenario,
     setWhatIfScenario,
     recomputeRoutes,
-    tacticalAlert
+    tacticalAlert,
+    setCustomDestination,
+    isComputingRoutes
   } = useFleet();
 
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isCustomMode, setIsCustomMode] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customLat, setCustomLat] = useState('');
+  const [customLon, setCustomLon] = useState('');
 
   // Live iceberg data
   const [icebergs, setIcebergs] = useState<any[]>([]);
@@ -322,19 +338,123 @@ export const NavigationPage: React.FC = () => {
 
               {/* Destination Station */}
               <div>
-                <label className="text-[10px] text-slate-300 font-mono block mb-1.5 flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-glacial-blue" />
-                  <span>Destination Station</span>
-                </label>
-                <select
-                  value={selectedDestinationId}
-                  onChange={(e) => setSelectedDestinationId(e.target.value)}
-                  className="w-full bg-polar-navy/50 border border-slate/30 rounded-sm p-2 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue font-medium"
-                >
-                  {stations.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({Math.abs(p.latitude).toFixed(1)}°S)</option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] text-slate-300 font-mono flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-glacial-blue" />
+                    <span>Destination Target</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomMode(!isCustomMode)}
+                    className="text-[10px] text-glacial-blue hover:text-white font-mono transition-colors cursor-pointer"
+                  >
+                    {isCustomMode ? '← Pick Station' : '+ Custom Location'}
+                  </button>
+                </div>
+
+                {!isCustomMode ? (
+                  <select
+                    value={selectedDestinationId}
+                    onChange={(e) => setSelectedDestinationId(e.target.value)}
+                    className="w-full bg-polar-navy/50 border border-slate/30 rounded-sm p-2 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue font-medium"
+                  >
+                    {stations.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} ({Math.abs(p.latitude).toFixed(1)}°S)</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="space-y-2 bg-polar-navy/40 p-2.5 rounded-sm border border-slate/30">
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Target / Waypoint Name"
+                        value={customName}
+                        onChange={(e) => setCustomName(e.target.value)}
+                        className="w-full bg-navy/80 border border-slate/30 rounded-sm p-1.5 text-xs text-ice-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-glacial-blue"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[9px] text-slate-400 font-mono block mb-0.5">Latitude (°S)</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="-69.40"
+                          value={customLat}
+                          onChange={(e) => setCustomLat(e.target.value)}
+                          className="w-full bg-navy/80 border border-slate/30 rounded-sm p-1.5 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-400 font-mono block mb-0.5">Longitude (°E/W)</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="76.19"
+                          value={customLon}
+                          onChange={(e) => setCustomLon(e.target.value)}
+                          className="w-full bg-navy/80 border border-slate/30 rounded-sm p-1.5 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      <span className="text-[9px] text-slate-400 font-mono w-full">Presets:</span>
+                      {[
+                        { label: 'Weddell Sea', lat: -71.5, lon: -40.2 },
+                        { label: 'Ross Shelf', lat: -78.2, lon: 175.0 },
+                        { label: 'Prydz Bay', lat: -68.2, lon: 74.5 },
+                        { label: 'Amundsen', lat: -72.0, lon: -110.0 }
+                      ].map(p => (
+                        <button
+                          key={p.label}
+                          type="button"
+                          onClick={() => {
+                            setCustomName(p.label);
+                            setCustomLat(String(p.lat));
+                            setCustomLon(String(p.lon));
+                          }}
+                          className="text-[9px] font-mono px-1.5 py-0.5 bg-polar-navy/60 hover:bg-glacial-blue/20 hover:text-ice-white border border-slate/30 rounded-xs text-slate-300 transition-colors cursor-pointer"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isComputingRoutes || !customLat || !customLon}
+                      onClick={() => {
+                        const lat = parseFloat(customLat);
+                        const lon = parseFloat(customLon);
+                        if (!isNaN(lat) && !isNaN(lon)) {
+                          setCustomDestination(customName || 'Custom Target', lat, lon);
+                          setIsCustomMode(false);
+                        }
+                      }}
+                      className="w-full py-1.5 px-3 bg-glacial-blue/20 hover:bg-glacial-blue/30 border border-glacial-blue text-ice-white rounded-sm text-xs font-mono font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {isComputingRoutes ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-glacial-blue" />
+                          <span>Computing Corridors...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Navigation className="w-3.5 h-3.5 text-glacial-blue" />
+                          <span>Compute Route to Location</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {isComputingRoutes && (
+                  <div className="flex items-center gap-2 mt-2 px-2.5 py-1.5 bg-glacial-blue/10 border border-glacial-blue/30 rounded-sm text-[11px] font-mono text-glacial-blue animate-pulse">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    <span>Calculating Pareto polar corridors...</span>
+                  </div>
+                )}
               </div>
 
               {/* Tactical Diversion & What-If Controls */}
