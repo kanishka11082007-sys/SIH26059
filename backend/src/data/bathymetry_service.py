@@ -17,6 +17,8 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "raw" / "bat
 ETOPO_PATH = DATA_DIR / "etopo_antarctic.nc"
 
 
+import threading
+
 class BathymetryService:
     """Service providing real NOAA ETOPO bathymetry lookups."""
 
@@ -25,32 +27,45 @@ class BathymetryService:
         self._ds: Optional[xr.Dataset] = None
         self._lats: Optional[np.ndarray] = None
         self._lons: Optional[np.ndarray] = None
+        self._lat_min: float = 0.0
+        self._lat_step: float = 0.0
+        self._lon_min: float = 0.0
+        self._lon_step: float = 0.0
         self._altitude: Optional[np.ndarray] = None
+        self._lock = threading.Lock()
         self._initialized = False
 
     def initialize(self) -> bool:
-        """Load and prepare the NetCDF dataset into memory."""
+        """Load and prepare the NetCDF dataset into memory thread-safely."""
         if self._initialized:
             return True
 
-        if not self.nc_path.exists():
-            logger.warning(f"Bathymetry dataset not found at {self.nc_path}")
-            return False
+        with self._lock:
+            if self._initialized:
+                return True
 
-        try:
-            self._ds = xr.open_dataset(self.nc_path)
-            self._lats = self._ds.latitude.values
-            self._lons = self._ds.longitude.values
-            self._altitude = self._ds.altitude.values
-            self._initialized = True
-            logger.info(
-                f"Loaded NOAA ETOPO bathymetry ({len(self._lats)} lats x {len(self._lons)} lons) "
-                f"from {self.nc_path}"
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to load NOAA ETOPO bathymetry: {e}")
-            return False
+            if not self.nc_path.exists():
+                logger.warning(f"Bathymetry dataset not found at {self.nc_path}")
+                return False
+
+            try:
+                self._ds = xr.open_dataset(self.nc_path)
+                self._lats = self._ds.latitude.values
+                self._lons = self._ds.longitude.values
+                self._lat_min = float(self._lats[0])
+                self._lat_step = float((self._lats[-1] - self._lats[0]) / (len(self._lats) - 1)) if len(self._lats) > 1 else 1.0
+                self._lon_min = float(self._lons[0])
+                self._lon_step = float((self._lons[-1] - self._lons[0]) / (len(self._lons) - 1)) if len(self._lons) > 1 else 1.0
+                self._altitude = self._ds.altitude.values
+                self._initialized = True
+                logger.info(
+                    f"Loaded NOAA ETOPO bathymetry ({len(self._lats)} lats x {len(self._lons)} lons) "
+                    f"from {self.nc_path}"
+                )
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load NOAA ETOPO bathymetry: {e}")
+                return False
 
     def get_depth(self, lat: float, lon: float) -> Dict[str, Any]:
         """Query real water depth in meters at a given geographic point.
@@ -95,8 +110,12 @@ class BathymetryService:
                 "lon": norm_lon,
             }
 
-        lat_idx = int(np.argmin(np.abs(self._lats - lat)))
-        lon_idx = int(np.argmin(np.abs(self._lons - norm_lon)))
+        if self._lat_step != 0.0 and self._lon_step != 0.0:
+            lat_idx = max(0, min(len(self._lats) - 1, int(round((lat - self._lat_min) / self._lat_step))))
+            lon_idx = max(0, min(len(self._lons) - 1, int(round((norm_lon - self._lon_min) / self._lon_step))))
+        else:
+            lat_idx = int(np.argmin(np.abs(self._lats - lat)))
+            lon_idx = int(np.argmin(np.abs(self._lons - norm_lon)))
 
         raw_alt = float(self._altitude[lat_idx, lon_idx])
 

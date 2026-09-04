@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { api } from '../services/api';
+import { api, clearApiCache } from '../services/api';
 
 export interface CanonicalVessel {
   id: string;
@@ -550,6 +550,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const dismissTacticalAlert = useCallback(() => {
     setTacticalAlert({ active: false, phase: 'idle' });
     setEmergencyRerouteActive(false);
+    clearApiCache('/routes');
     api.restore().catch(() => {});
     if (selectedVessel && selectedDestination) {
       const cacheKey = `${selectedVessel.id}_${selectedDestination.id}_em_${whatIfScenario.active ? 'whatif' : 'norm'}`;
@@ -787,6 +788,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!selectedVessel || !selectedDestination) return;
     const cacheKey = `${selectedVessel.id}_${selectedDestination.id}_${emergencyRerouteActive ? 'em' : 'norm'}_${whatIfScenario.active ? 'whatif' : 'norm'}`;
     routeCacheRef.current.delete(cacheKey);
+    clearApiCache('/routes');
     setIsComputingRoutes(true);
 
     try {

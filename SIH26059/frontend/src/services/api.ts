@@ -12,20 +12,72 @@ function getApiBase(): string {
 
 const API_BASE = getApiBase();
 
-export async function apiFetch<T>(endpoint: string): Promise<T | null> {
-  try {
-    const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
-    const url = API_BASE + cleanEndpoint;
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.warn(`[PolarNav API] HTTP ${res.status} for ${url}`);
-      return null;
-    }
-    return await res.json();
-  } catch (err) {
-    console.warn(`[PolarNav API] Connection error for ${endpoint}:`, err);
-    return null;
+// In-flight Promise deduplication map & TTL response cache for GET endpoints
+const inFlightRequests = new Map<string, Promise<any>>();
+const responseCache = new Map<string, { data: any; expiry: number }>();
+
+// Cache TTL config (routes: 30s, static/semi-static: 60s)
+function getCacheTtlMs(endpoint: string): number {
+  if (endpoint.startsWith("/routes")) return 30_000;
+  if (endpoint.startsWith("/antarctic/stations") || endpoint.startsWith("/antarctic/land-mask")) return 300_000;
+  if (endpoint.startsWith("/vessels")) return 15_000;
+  if (endpoint.startsWith("/icebergs")) return 20_000;
+  if (endpoint.startsWith("/sic") || endpoint.startsWith("/risk")) return 60_000;
+  return 10_000;
+}
+
+export function clearApiCache(prefix?: string) {
+  if (!prefix) {
+    responseCache.clear();
+    return;
   }
+  for (const key of responseCache.keys()) {
+    if (key.includes(prefix)) {
+      responseCache.delete(key);
+    }
+  }
+}
+
+export async function apiFetch<T>(endpoint: string): Promise<T | null> {
+  const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const cacheKey = cleanEndpoint;
+
+  // 1. Check TTL Cache
+  const cached = responseCache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.data as T;
+  }
+
+  // 2. Check In-Flight Request Deduplication
+  if (inFlightRequests.has(cacheKey)) {
+    return inFlightRequests.get(cacheKey) as Promise<T | null>;
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      const url = API_BASE + cleanEndpoint;
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.warn(`[PolarNav API] HTTP ${res.status} for ${url}`);
+        return null;
+      }
+      const data = await res.json();
+      // Cache successful response
+      responseCache.set(cacheKey, {
+        data,
+        expiry: Date.now() + getCacheTtlMs(cleanEndpoint)
+      });
+      return data as T;
+    } catch (err) {
+      console.warn(`[PolarNav API] Connection error for ${endpoint}:`, err);
+      return null;
+    } finally {
+      inFlightRequests.delete(cacheKey);
+    }
+  })();
+
+  inFlightRequests.set(cacheKey, fetchPromise);
+  return fetchPromise;
 }
 
 export async function apiPost<T>(endpoint: string, body: any): Promise<T | null> {

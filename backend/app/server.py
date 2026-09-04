@@ -88,16 +88,17 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup_prewarm():
-    """Asynchronously pre-warm route and iceberg calculation caches on startup for immediate responses."""
+    """Asynchronously pre-warm core routing context safely in the background."""
     import threading
     def _warm():
         try:
-            from backend.app.data_transformer import get_icebergs, get_routes
+            from src.optimization.polar_routing_engine import routing_engine
+            routing_engine.initialize()
+            from backend.app.data_transformer import get_icebergs
             get_icebergs()
-            get_routes()
         except Exception:
             pass
-    threading.Thread(target=_warm, daemon=True).start()
+    threading.Thread(target=_warm, daemon=True, name="polarnav_startup_warm").start()
 
 
 ANTARCTIC_DATA_DIR = str(BACKEND_DIR / "data" / "processed" / "verification")

@@ -14,29 +14,62 @@ def _load_json(fn):
             return json.load(f)
     return None
 
+import threading
+
 # ---- Time-dependent data loaders ----
 
-# Cache for timestep data (loaded once)
+# Thread-safe cache for timestep data
+_LOADER_LOCK = threading.Lock()
 _sic_ts_cache = None
+_sic_ts_mtime = 0
 _env_ts_cache = None
+_env_ts_mtime = 0
 _risk_ts_cache = None
+_risk_ts_mtime = 0
 
 def _load_sic_timesteps():
-    global _sic_ts_cache
-    if _sic_ts_cache is None:
+    global _sic_ts_cache, _sic_ts_mtime
+    fp = ANTARCTIC_DATA / "phase2_sic_timesteps.json"
+    mtime = fp.stat().st_mtime if fp.exists() else 0
+    if _sic_ts_cache is not None and mtime == _sic_ts_mtime:
+        return _sic_ts_cache
+    with _LOADER_LOCK:
+        if _sic_ts_cache is not None and mtime == _sic_ts_mtime:
+            return _sic_ts_cache
+        t0 = time.perf_counter()
         _sic_ts_cache = _load_json("phase2_sic_timesteps.json")
+        _sic_ts_mtime = mtime
+        print(f"DATA_LOAD: sic_timesteps={(time.perf_counter() - t0)*1000:.1f}ms")
     return _sic_ts_cache
 
 def _load_env_timesteps():
-    global _env_ts_cache
-    if _env_ts_cache is None:
+    global _env_ts_cache, _env_ts_mtime
+    fp = ANTARCTIC_DATA / "environmental_timesteps.json"
+    mtime = fp.stat().st_mtime if fp.exists() else 0
+    if _env_ts_cache is not None and mtime == _env_ts_mtime:
+        return _env_ts_cache
+    with _LOADER_LOCK:
+        if _env_ts_cache is not None and mtime == _env_ts_mtime:
+            return _env_ts_cache
+        t0 = time.perf_counter()
         _env_ts_cache = _load_json("environmental_timesteps.json")
+        _env_ts_mtime = mtime
+        print(f"DATA_LOAD: env_timesteps={(time.perf_counter() - t0)*1000:.1f}ms")
     return _env_ts_cache
 
 def _load_risk_timesteps():
-    global _risk_ts_cache
-    if _risk_ts_cache is None:
+    global _risk_ts_cache, _risk_ts_mtime
+    fp = ANTARCTIC_DATA / "phase4_risk_timesteps.json"
+    mtime = fp.stat().st_mtime if fp.exists() else 0
+    if _risk_ts_cache is not None and mtime == _risk_ts_mtime:
+        return _risk_ts_cache
+    with _LOADER_LOCK:
+        if _risk_ts_cache is not None and mtime == _risk_ts_mtime:
+            return _risk_ts_cache
+        t0 = time.perf_counter()
         _risk_ts_cache = _load_json("phase4_risk_timesteps.json")
+        _risk_ts_mtime = mtime
+        print(f"DATA_LOAD: risk_timesteps={(time.perf_counter() - t0)*1000:.1f}ms")
     return _risk_ts_cache
 
 
@@ -382,13 +415,22 @@ def clear_dynamic_icebergs():
     _DYNAMIC_ICEBERGS.clear()
 
 
+_MASTER_ICEBERGS_DATA = None
+_MASTER_ICEBERGS_TIMESTAMP = 0
+_ICEBERGS_LOCK = threading.Lock()
+
+
 def get_icebergs(time_horizon=None):
     """Get icebergs with optimized ML and ocean current future tracks (instantaneous from precomputed cache)."""
     global _MASTER_ICEBERGS_DATA, _MASTER_ICEBERGS_TIMESTAMP, _DYNAMIC_ICEBERGS
     now_t = time.time()
     if _MASTER_ICEBERGS_DATA is None or (now_t - _MASTER_ICEBERGS_TIMESTAMP) > 600.0:  # 10 min TTL
-        _MASTER_ICEBERGS_DATA = _compute_master_icebergs()
-        _MASTER_ICEBERGS_TIMESTAMP = now_t
+        with _ICEBERGS_LOCK:
+            if _MASTER_ICEBERGS_DATA is None or (now_t - _MASTER_ICEBERGS_TIMESTAMP) > 600.0:
+                t0 = time.perf_counter()
+                _MASTER_ICEBERGS_DATA = _compute_master_icebergs()
+                _MASTER_ICEBERGS_TIMESTAMP = now_t
+                print(f"DATA_LOAD: master_icebergs={(time.perf_counter() - t0)*1000:.1f}ms count={len(_MASTER_ICEBERGS_DATA)}")
 
     clean_req = str(time_horizon or "NOW").strip().upper().replace("+", "")
     active_h_str = f"+{clean_req}" if clean_req not in ("ALL", "NOW", "") else (clean_req or "NOW")
@@ -646,9 +688,15 @@ def get_routes(vessel_id=None, dest_id=None, dest_lat=None, dest_lon=None, dest_
             dest_lon = st["longitude"]
             dest_name = st["name"]
 
-    # If coordinates given without station ID, check if close to Bharati (-69.41, 76.19)
+    # If coordinates given without station ID, snap to canonical station if nearby
     if not norm_dest_id and dest_lat is not None and dest_lon is not None:
-        if abs(dest_lat - (-69.41)) < 0.1 and abs(dest_lon - 76.19) < 0.2:
+        all_stations = facilities_service.get_stations() if hasattr(facilities_service, 'get_stations') else []
+        for st in all_stations:
+            if abs(dest_lat - st["latitude"]) < 0.25 and abs(dest_lon - st["longitude"]) < 0.5:
+                norm_dest_id = st["id"]
+                dest_name = st["name"]
+                break
+        if not norm_dest_id and abs(dest_lat - (-69.41)) < 0.1 and abs(dest_lon - 76.19) < 0.2:
             norm_dest_id = "bharati"
 
     dest_override = (dest_lat, dest_lon) if (dest_lat is not None and dest_lon is not None) else None
@@ -702,20 +750,23 @@ def get_routes(vessel_id=None, dest_id=None, dest_lat=None, dest_lon=None, dest_
 
 
 def _prewarm_canonical_routes():
-    """Background worker that pre-populates routes for instant zero-latency page loads."""
-    priority_pairs = [
-        ("rv_sagar_nidhi", "bharati"),
+    """Background worker that pre-populates primary default route first and yields to avoid CPU contention."""
+    # Pre-warm primary default flagship voyage first
+    try:
+        get_routes(vessel_id="rv_sagar_nidhi", dest_id="bharati")
+    except Exception:
+        pass
+
+    # Secondary priority pairs prewarmed lazily with yields
+    secondary_pairs = [
         ("rv_sagar_nidhi", "maitri"),
         ("rv_polarstern", "neumayer_iii"),
         ("rrs_sir_david_attenborough", "palmer"),
         ("rv_sagar_nidhi", "mcmurdo"),
-        ("rv_sagar_nidhi", "rothera"),
-        ("rv_sagar_nidhi", "casey"),
-        ("rv_sagar_nidhi", "davis"),
-        ("rv_sagar_nidhi", "comandante_ferraz"),
     ]
-    for v_id, d_id in priority_pairs:
+    for v_id, d_id in secondary_pairs:
         try:
+            time.sleep(1.0)  # Yield CPU to allow incoming HTTP requests to process immediately
             get_routes(vessel_id=v_id, dest_id=d_id)
         except Exception:
             pass
@@ -893,8 +944,12 @@ def get_sic_timesteps():
     ]
 
 
+_SIC_GRID_CACHE = {}
+_SIC_GRID_LOCK = threading.Lock()
+
 def get_sic_grid(time_step=None):
-    """Get SIC grid points, zonal profile, class distribution, and drift vectors for a specific timestep."""
+    """Get SIC grid points, zonal profile, class distribution, and drift vectors for a specific timestep (cached)."""
+    global _SIC_GRID_CACHE
     sic_ts = _load_sic_timesteps()
     if not sic_ts or not sic_ts.get("timesteps"):
         return {"lats": [], "lons": [], "points": [], "zonal_profile": [], "class_distribution": {}, "drift_vectors": []}
@@ -907,93 +962,106 @@ def get_sic_grid(time_step=None):
         except (ValueError, TypeError):
             idx = 0
     idx = max(0, min(idx, len(sic_ts["timesteps"]) - 1))
-    
-    ts = sic_ts["timesteps"][idx]
-    points = ts.get("points", [])
-    
-    # Compute rich zonal profile and class distribution
-    bins = {}
-    classes = {"fast_ice": 0, "close_pack": 0, "open_drift": 0, "marginal_ice": 0, "open_water": 0}
-    drift_vectors = []
-    
-    step_sample = max(1, len(points) // 120)  # Subsample for smooth vector field
-    
-    for i, p in enumerate(points):
-        lat, lon, sic = p[0], p[1], p[2]
-        pct = sic * 100.0 if sic <= 1.0 else float(sic)
+
+    if idx in _SIC_GRID_CACHE:
+        return _SIC_GRID_CACHE[idx]
+
+    with _SIC_GRID_LOCK:
+        if idx in _SIC_GRID_CACHE:
+            return _SIC_GRID_CACHE[idx]
+
+        t0 = time.perf_counter()
+        ts = sic_ts["timesteps"][idx]
+        points = ts.get("points", [])
         
-        # Latitude binning for transect
-        lat_bin = round(lat)
-        if lat_bin not in bins:
-            bins[lat_bin] = []
-        bins[lat_bin].append(pct)
+        # Compute rich zonal profile and class distribution
+        bins = {}
+        classes = {"fast_ice": 0, "close_pack": 0, "open_drift": 0, "marginal_ice": 0, "open_water": 0}
+        drift_vectors = []
         
-        # WMO Class breakdown
-        if pct >= 70:
-            classes["fast_ice"] += 1
-        elif pct >= 40:
-            classes["close_pack"] += 1
-        elif pct >= 15:
-            classes["open_drift"] += 1
-        elif pct >= 3:
-            classes["marginal_ice"] += 1
-        else:
-            classes["open_water"] += 1
+        step_sample = max(1, len(points) // 120)  # Subsample for smooth vector field
+        
+        for i, p in enumerate(points):
+            lat, lon, sic = p[0], p[1], p[2]
+            pct = sic * 100.0 if sic <= 1.0 else float(sic)
             
-        # Subsample points for physical drift vectors
-        if i % step_sample == 0 and pct >= 5:
-            # Physical oceanographic drift calculation (East Wind Drift near continent, West Wind Drift in ACC)
-            is_coastal = lat < -66.0
-            drift_spd = round(0.18 + (pct / 100.0) * 0.22 + (idx * 0.04), 2)  # m/s
-            heading = 265.0 if is_coastal else 85.0  # Westward near shelf, Eastward offshore
-            # Katabatic offshore component
-            heading = (heading + (lat + 70.0) * 1.8) % 360.0
+            # Latitude binning for transect
+            lat_bin = round(lat)
+            if lat_bin not in bins:
+                bins[lat_bin] = []
+            bins[lat_bin].append(pct)
             
-            rad = math.radians(heading)
-            u = round(drift_spd * math.sin(rad), 2)
-            v = round(drift_spd * math.cos(rad), 2)
-            
-            drift_vectors.append({
-                "lat": round(lat, 3),
-                "lon": round(lon, 3),
-                "speed": drift_spd,
-                "heading": round(heading, 1),
-                "u": u,
-                "v": v,
-                "sic": round(pct, 1)
+            # WMO Class breakdown
+            if pct >= 70:
+                classes["fast_ice"] += 1
+            elif pct >= 40:
+                classes["close_pack"] += 1
+            elif pct >= 15:
+                classes["open_drift"] += 1
+            elif pct >= 3:
+                classes["marginal_ice"] += 1
+            else:
+                classes["open_water"] += 1
+                
+            # Subsample points for physical drift vectors
+            if i % step_sample == 0 and pct >= 5:
+                is_coastal = lat < -66.0
+                drift_spd = round(0.18 + (pct / 100.0) * 0.22 + (idx * 0.04), 2)  # m/s
+                heading = 265.0 if is_coastal else 85.0  # Westward near shelf, Eastward offshore
+                heading = (heading + (lat + 70.0) * 1.8) % 360.0
+                
+                rad = math.radians(heading)
+                u = round(drift_spd * math.sin(rad), 2)
+                v = round(drift_spd * math.cos(rad), 2)
+                
+                drift_vectors.append({
+                    "lat": round(lat, 3),
+                    "lon": round(lon, 3),
+                    "speed": drift_spd,
+                    "heading": round(heading, 1),
+                    "u": u,
+                    "v": v,
+                    "sic": round(pct, 1)
+                })
+                
+        total_pts = max(1, len(points))
+        dist = {k: round((v / total_pts) * 100.0, 1) for k, v in classes.items()}
+        
+        zonal_profile = []
+        for lat_b in sorted(bins.keys()):
+            vals = bins[lat_b]
+            zonal_profile.append({
+                "latitude": lat_b,
+                "label": f"{abs(lat_b)}°S",
+                "meanSic": round(sum(vals) / len(vals), 1),
+                "maxSic": round(max(vals), 1),
+                "sampleCount": len(vals)
             })
             
-    total_pts = max(1, len(points))
-    dist = {k: round((v / total_pts) * 100.0, 1) for k, v in classes.items()}
-    
-    zonal_profile = []
-    for lat_b in sorted(bins.keys()):
-        vals = bins[lat_b]
-        zonal_profile.append({
-            "latitude": lat_b,
-            "label": f"{abs(lat_b)}°S",
-            "meanSic": round(sum(vals) / len(vals), 1),
-            "maxSic": round(max(vals), 1),
-            "sampleCount": len(vals)
-        })
-        
-    return {
-        "lats": sic_ts.get("lats", []),
-        "lons": sic_ts.get("lons", []),
-        "points": points,
-        "label": ts.get("label", ""),
-        "time": ts.get("time", ""),
-        "concentration_mean": ts.get("concentration_mean", 0),
-        "total_points": len(points),
-        "zonal_profile": zonal_profile,
-        "class_distribution": dist,
-        "drift_vectors": drift_vectors
-    }
+        result = {
+            "lats": sic_ts.get("lats", []),
+            "lons": sic_ts.get("lons", []),
+            "points": points,
+            "label": ts.get("label", ""),
+            "time": ts.get("time", ""),
+            "concentration_mean": ts.get("concentration_mean", 0),
+            "total_points": len(points),
+            "zonal_profile": zonal_profile,
+            "class_distribution": dist,
+            "drift_vectors": drift_vectors
+        }
+        _SIC_GRID_CACHE[idx] = result
+        print(f"DATA_LOAD: sic_grid_timestep_{idx}={(time.perf_counter() - t0)*1000:.1f}ms")
+        return result
 
 
+
+_RISK_GRID_CACHE = {}
+_RISK_GRID_LOCK = threading.Lock()
 
 def get_risk_grid(time_step=None):
-    """Get risk grid points for a specific timestep."""
+    """Get risk grid points for a specific timestep (cached)."""
+    global _RISK_GRID_CACHE
     risk_ts = _load_risk_timesteps()
     if not risk_ts or not risk_ts.get("timesteps"):
         return {"lats": [], "lons": [], "points": []}
@@ -1006,19 +1074,29 @@ def get_risk_grid(time_step=None):
         except (ValueError, TypeError):
             idx = 0
     idx = max(0, min(idx, len(risk_ts["timesteps"]) - 1))
-    
-    ts = risk_ts["timesteps"][idx]
-    return {
-        "lats": risk_ts["lats"],
-        "lons": risk_ts["lons"],
-        "points": ts["points"],
-        "label": ts["label"],
-        "time": ts["time"],
-        "risk_mean": ts["risk_mean"],
-        "risk_max": ts["risk_max"],
-        "high_risk_cells": ts["high_risk_cells"],
-        "critical_cells": ts["critical_cells"],
-    }
+
+    if idx in _RISK_GRID_CACHE:
+        return _RISK_GRID_CACHE[idx]
+
+    with _RISK_GRID_LOCK:
+        if idx in _RISK_GRID_CACHE:
+            return _RISK_GRID_CACHE[idx]
+        t0 = time.perf_counter()
+        ts = risk_ts["timesteps"][idx]
+        result = {
+            "lats": risk_ts["lats"],
+            "lons": risk_ts["lons"],
+            "points": ts["points"],
+            "label": ts["label"],
+            "time": ts["time"],
+            "risk_mean": ts["risk_mean"],
+            "risk_max": ts["risk_max"],
+            "high_risk_cells": ts["high_risk_cells"],
+            "critical_cells": ts["critical_cells"],
+        }
+        _RISK_GRID_CACHE[idx] = result
+        print(f"DATA_LOAD: risk_grid_timestep_{idx}={(time.perf_counter() - t0)*1000:.1f}ms")
+        return result
 
 
 def get_waypoints():

@@ -6,6 +6,7 @@ Builds an optimized SciPy KDTree for fast spatial queries.
 Keeps observed satellite observations and future ML forecasts separate.
 Source: NOAA/NSIDC Climate Data Record of Passive Microwave Sea Ice Concentration, Version 4.
 """
+import time
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
@@ -24,6 +25,8 @@ CDR_NETCDF_PATH = DATA_DIR / "real_cdr_sic.nc"
 TRANSFORMER = pyproj.Transformer.from_crs("EPSG:3412", "EPSG:4326", always_xy=True)
 
 
+import threading
+
 class RealSeaIceService:
     """Service providing real NOAA/NSIDC satellite sea ice concentration lookups."""
 
@@ -33,73 +36,81 @@ class RealSeaIceService:
         self._sic_values: Optional[np.ndarray] = None
         self._point_coords: Optional[np.ndarray] = None  # [lat, lon]
         self._timestamp: str = "2024-06-01T00:00:00Z"
+        self._lock = threading.Lock()
         self._initialized = False
 
     def initialize(self) -> bool:
-        """Load and project NOAA CDR NetCDF into spatial KDTree."""
+        """Load and project NOAA CDR NetCDF into spatial KDTree thread-safely."""
         if self._initialized:
             return True
 
-        if not self.nc_path.exists():
-            logger.warning(f"Real CDR SIC file not found at {self.nc_path}")
-            return False
+        with self._lock:
+            if self._initialized:
+                return True
 
-        try:
-            ds = xr.open_dataset(self.nc_path)
-            # Variable: cdr_seaice_conc_monthly (dims: time, ygrid, xgrid)
-            var_name = "cdr_seaice_conc_monthly"
-            if var_name not in ds:
-                # Fallback to first data variable
-                var_name = list(ds.data_vars.keys())[0]
+            if not self.nc_path.exists():
+                logger.warning(f"Real CDR SIC file not found at {self.nc_path}")
+                return False
 
-            da = ds[var_name].isel(time=0)
-            if "time" in ds and len(ds.time) > 0:
-                self._timestamp = str(ds.time.values[0])[:19] + "Z"
+            try:
+                t0 = time.perf_counter()
+                ds = xr.open_dataset(self.nc_path)
+                # Variable: cdr_seaice_conc_monthly (dims: time, ygrid, xgrid)
+                var_name = "cdr_seaice_conc_monthly"
+                if var_name not in ds:
+                    # Fallback to first data variable
+                    var_name = list(ds.data_vars.keys())[0]
 
-            raw_x = ds.xgrid.values
-            raw_y = ds.ygrid.values
-            raw_vals = da.values
+                da = ds[var_name].isel(time=0)
+                if "time" in ds and len(ds.time) > 0:
+                    self._timestamp = str(ds.time.values[0])[:19] + "Z"
 
-            ds.close()
+                raw_x = ds.xgrid.values
+                raw_y = ds.ygrid.values
+                raw_vals = da.values
 
-            # Subsample grid by factor of 3 to optimize KDTree memory and query performance
-            step = 3
-            sub_x = raw_x[::step]
-            sub_y = raw_y[::step]
-            sub_vals = raw_vals[::step, ::step]
+                ds.close()
 
-            # Meshgrid for projected points
-            gx, gy = np.meshgrid(sub_x, sub_y)
-            flat_x = gx.ravel()
-            flat_y = gy.ravel()
-            flat_vals = sub_vals.ravel()
+                # Subsample grid by factor of 3 to optimize KDTree memory and query performance
+                step = 3
+                sub_x = raw_x[::step]
+                sub_y = raw_y[::step]
+                sub_vals = raw_vals[::step, ::step]
 
-            # Transform projected coordinates to [lon, lat]
-            lons, lats = TRANSFORMER.transform(flat_x, flat_y)
+                # Meshgrid for projected points
+                gx, gy = np.meshgrid(sub_x, sub_y)
+                flat_x = gx.ravel()
+                flat_y = gy.ravel()
+                flat_vals = sub_vals.ravel()
 
-            # Filter valid oceanic points (concentration between 0.0 and 1.0)
-            # CDR flags: > 1.0 (e.g. 2.51 = pole hole, 2.53 = coast, 2.54 = land, 2.55 = missing)
-            valid_mask = ~np.isnan(flat_vals) & (flat_vals >= 0.0) & (flat_vals <= 1.0) & (lats <= -50.0)
+                # Transform projected coordinates to [lon, lat]
+                lons, lats = TRANSFORMER.transform(flat_x, flat_y)
 
-            valid_lats = lats[valid_mask]
-            valid_lons = lons[valid_mask]
-            valid_sic = flat_vals[valid_mask]
+                # Filter valid oceanic points (concentration between 0.0 and 1.0)
+                # CDR flags: > 1.0 (e.g. 2.51 = pole hole, 2.53 = coast, 2.54 = land, 2.55 = missing)
+                valid_mask = ~np.isnan(flat_vals) & (flat_vals >= 0.0) & (flat_vals <= 1.0) & (lats <= -50.0)
 
-            # Build KDTree using [lon, lat]
-            tree_coords = np.column_stack([valid_lons, valid_lats])
-            self._tree = KDTree(tree_coords)
-            self._sic_values = valid_sic
-            self._point_coords = np.column_stack([valid_lats, valid_lons])
+                valid_lats = lats[valid_mask]
+                valid_lons = lons[valid_mask]
+                valid_sic = flat_vals[valid_mask]
 
-            self._initialized = True
-            logger.info(
-                f"Successfully initialized Real NOAA/NSIDC CDR SIC with {len(valid_sic)} "
-                f"polar points from {self.nc_path}"
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to initialize NOAA CDR SIC service: {e}")
-            return False
+                # Build KDTree using [lon, lat]
+                tree_coords = np.column_stack([valid_lons, valid_lats])
+                self._tree = KDTree(tree_coords)
+                self._sic_values = valid_sic
+                self._point_coords = np.column_stack([valid_lats, valid_lons])
+
+                self._initialized = True
+                load_ms = (time.perf_counter() - t0) * 1000.0
+                logger.info(
+                    f"Successfully initialized Real NOAA/NSIDC CDR SIC with {len(valid_sic)} "
+                    f"polar points from {self.nc_path} in {load_ms:.1f}ms"
+                )
+                print(f"DATA_LOAD: real_sic_kdtree={load_ms:.1f}ms points={len(valid_sic)}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to initialize NOAA CDR SIC service: {e}")
+                return False
 
     def get_sic(self, lat: float, lon: float) -> Dict[str, Any]:
         """Query authentic NOAA/NSIDC satellite Sea Ice Concentration at a coordinate.

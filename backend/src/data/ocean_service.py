@@ -19,6 +19,8 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "raw" / "oce
 CURRENTS_PATH = DATA_DIR / "copernicus_currents_real.nc"
 
 
+import threading
+
 class OceanCurrentsService:
     """Service providing real Copernicus Marine ocean current lookups."""
 
@@ -27,39 +29,52 @@ class OceanCurrentsService:
         self._ds: Optional[xr.Dataset] = None
         self._lats: Optional[np.ndarray] = None
         self._lons: Optional[np.ndarray] = None
+        self._lat_min: float = 0.0
+        self._lat_step: float = 0.0
+        self._lon_min: float = 0.0
+        self._lon_step: float = 0.0
         self._uo: Optional[np.ndarray] = None  # Eastward current (m/s)
         self._vo: Optional[np.ndarray] = None  # Northward current (m/s)
         self._timestamp: str = "2024-06-15T12:00:00Z"
+        self._lock = threading.Lock()
         self._initialized = False
 
     def initialize(self) -> bool:
-        """Load and prepare Copernicus currents NetCDF."""
+        """Load and prepare Copernicus currents NetCDF thread-safely."""
         if self._initialized:
             return True
 
-        if not self.nc_path.exists():
-            logger.warning(f"Copernicus currents file not found at {self.nc_path}")
-            return False
+        with self._lock:
+            if self._initialized:
+                return True
 
-        try:
-            self._ds = xr.open_dataset(self.nc_path)
-            self._lats = self._ds.latitude.values
-            self._lons = self._ds.longitude.values
-            # Surface layer at index depth=0 (depth ~ 0.5m)
-            self._uo = self._ds.uo.isel(time=0, depth=0).values
-            self._vo = self._ds.vo.isel(time=0, depth=0).values
-            if "time" in self._ds and len(self._ds.time) > 0:
-                self._timestamp = str(self._ds.time.values[0])[:19] + "Z"
+            if not self.nc_path.exists():
+                logger.warning(f"Copernicus currents file not found at {self.nc_path}")
+                return False
 
-            self._initialized = True
-            logger.info(
-                f"Loaded Copernicus Marine Ocean Currents ({len(self._lats)} lats x {len(self._lons)} lons) "
-                f"from {self.nc_path}"
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to load Copernicus ocean currents: {e}")
-            return False
+            try:
+                self._ds = xr.open_dataset(self.nc_path)
+                self._lats = self._ds.latitude.values
+                self._lons = self._ds.longitude.values
+                self._lat_min = float(self._lats[0])
+                self._lat_step = float((self._lats[-1] - self._lats[0]) / (len(self._lats) - 1)) if len(self._lats) > 1 else 1.0
+                self._lon_min = float(self._lons[0])
+                self._lon_step = float((self._lons[-1] - self._lons[0]) / (len(self._lons) - 1)) if len(self._lons) > 1 else 1.0
+                # Surface layer at index depth=0 (depth ~ 0.5m)
+                self._uo = self._ds.uo.isel(time=0, depth=0).values
+                self._vo = self._ds.vo.isel(time=0, depth=0).values
+                if "time" in self._ds and len(self._ds.time) > 0:
+                    self._timestamp = str(self._ds.time.values[0])[:19] + "Z"
+
+                self._initialized = True
+                logger.info(
+                    f"Loaded Copernicus Marine Ocean Currents ({len(self._lats)} lats x {len(self._lons)} lons) "
+                    f"from {self.nc_path}"
+                )
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load Copernicus ocean currents: {e}")
+                return False
 
     def get_current(self, lat: float, lon: float) -> Dict[str, Any]:
         """Query real ocean current vector at given latitude/longitude.
@@ -107,8 +122,12 @@ class OceanCurrentsService:
                 "lon": norm_lon,
             }
 
-        lat_idx = int(np.argmin(np.abs(self._lats - lat)))
-        lon_idx = int(np.argmin(np.abs(self._lons - norm_lon)))
+        if self._lat_step != 0.0 and self._lon_step != 0.0:
+            lat_idx = max(0, min(len(self._lats) - 1, int(round((lat - self._lat_min) / self._lat_step))))
+            lon_idx = max(0, min(len(self._lons) - 1, int(round((norm_lon - self._lon_min) / self._lon_step))))
+        else:
+            lat_idx = int(np.argmin(np.abs(self._lats - lat)))
+            lon_idx = int(np.argmin(np.abs(self._lons - norm_lon)))
 
         u = float(self._uo[lat_idx, lon_idx])
         v = float(self._vo[lat_idx, lon_idx])
