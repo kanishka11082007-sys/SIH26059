@@ -77,6 +77,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+def startup_prewarm():
+    """Asynchronously pre-warm route calculation cache on startup for immediate responses."""
+    import threading
+    def _warm():
+        try:
+            from backend.app.data_transformer import get_routes
+            get_routes()
+        except Exception:
+            pass
+    threading.Thread(target=_warm, daemon=True).start()
+
+
 ANTARCTIC_DATA_DIR = str(BACKEND_DIR / "data" / "processed" / "verification")
 
 
