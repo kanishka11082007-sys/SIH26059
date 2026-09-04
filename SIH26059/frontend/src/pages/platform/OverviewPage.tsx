@@ -4,7 +4,8 @@ import {
   ShieldAlert, 
   Ship, 
   CheckCircle2, 
-  ArrowRight
+  ArrowRight,
+  MapPin
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from "../../hooks/useApiData";
@@ -27,6 +28,10 @@ export const OverviewPage: React.FC = () => {
     selectedVesselId,
     selectedVessel,
     setSelectedVesselId,
+    stations,
+    selectedDestinationId,
+    selectedDestination,
+    setSelectedDestinationId,
     routes,
     activeRouteId,
     setActiveRouteId,
@@ -34,7 +39,6 @@ export const OverviewPage: React.FC = () => {
     selectedIcebergId,
     setSelectedIcebergId
   } = useFleet();
-
 
   const currentRoute = activeRoute || routes[0] || {
     id: 'route-b',
@@ -79,15 +83,11 @@ export const OverviewPage: React.FC = () => {
             onSelectIceberg={(id) => setSelectedIcebergId(id)}
             selectedVesselId={selectedVesselId}
             onSelectVessel={(id) => setSelectedVesselId(id)}
-            destinationMarker={
-              selectedVessel.dest_lat !== undefined && selectedVessel.dest_lon !== undefined
-                ? {
-                    latitude: selectedVessel.dest_lat,
-                    longitude: selectedVessel.dest_lon,
-                    name: selectedVessel.destination || 'Antarctic Station'
-                  }
-                : null
-            }
+            destinationMarker={{
+              latitude: selectedDestination.latitude,
+              longitude: selectedDestination.longitude,
+              name: selectedDestination.name
+            }}
             vesselInfo={
               selectedVessel.latitude !== undefined && selectedVessel.longitude !== undefined
                 ? {
@@ -113,7 +113,7 @@ export const OverviewPage: React.FC = () => {
 
         {/* 2. HOME-PAGE STYLE BOTTOM TELEMETRY BAR */}
         <div className="w-full border-t border-slate/20 bg-navy/95 backdrop-blur-md shrink-0 font-mono z-20">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 items-center">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 items-center">
             
             {/* 1. Active Vessel Selector */}
             <div>
@@ -129,6 +129,25 @@ export const OverviewPage: React.FC = () => {
                 {fleet.map(v => (
                   <option key={v.id} value={v.id}>
                     {v.flag} {v.name} ({v.speed || v.sog} kn)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 2. Destination Station Selector */}
+            <div>
+              <p className="text-slate-400 text-[9px] uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                <MapPin className="w-3 h-3 text-glacial-blue" />
+                MISSION DESTINATION
+              </p>
+              <select
+                value={selectedDestinationId}
+                onChange={(e) => setSelectedDestinationId(e.target.value)}
+                className="bg-polar-navy/50 border border-slate/30 rounded-sm px-2 py-1 text-xs text-ice-white font-semibold font-mono focus:outline-none focus:border-glacial-blue w-full truncate"
+              >
+                {stations.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({Math.abs(s.latitude).toFixed(1)}°S)
                   </option>
                 ))}
               </select>

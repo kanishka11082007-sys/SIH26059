@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  Loader2, Download, Zap, Ship, MapPin, Sparkles
+  Loader2, Download, Zap, Ship, MapPin, Sparkles, ShieldAlert
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from '../../hooks/useApiData';
@@ -81,109 +81,7 @@ const computeHeading = (p1: [number, number], p2: [number, number]): number => {
   const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
   return Math.round((Math.atan2(y, x) * 180 / Math.PI + 360) % 360);
 };
-
-// Helper to build realistic geodesic corridors directly between active Vessel and Destination Station
-const generateCorridors = (
-  origin: { lat: number; lon: number; name?: string },
-  dest: { lat: number; lon: number; name?: string },
-  speed: number,
-  pClass: string,
-  vesselId?: string
-): RouteOption[] => {
-  const dLat = dest.lat - origin.lat;
-  const dLon = dest.lon - origin.lon;
-
-  // Gentle lateral safety offsets perpendicular to heading
-  const routeBPath: [number, number][] = [
-    [origin.lat, origin.lon],
-    [origin.lat + dLat * 0.25, origin.lon + dLon * 0.25 + dLat * 0.05],
-    [origin.lat + dLat * 0.50, origin.lon + dLon * 0.50 + dLat * 0.08],
-    [origin.lat + dLat * 0.75, origin.lon + dLon * 0.75 + dLat * 0.04],
-    [dest.lat, dest.lon]
-  ];
-
-  const routeCPath: [number, number][] = [
-    [origin.lat, origin.lon],
-    [origin.lat + dLat * 0.25, origin.lon + dLon * 0.25 + dLat * 0.10],
-    [origin.lat + dLat * 0.50, origin.lon + dLon * 0.50 + dLat * 0.15],
-    [origin.lat + dLat * 0.75, origin.lon + dLon * 0.75 + dLat * 0.08],
-    [dest.lat, dest.lon]
-  ];
-
-  const routeAPath: [number, number][] = [
-    [origin.lat, origin.lon],
-    [origin.lat + dLat * 0.33, origin.lon + dLon * 0.33],
-    [origin.lat + dLat * 0.67, origin.lon + dLon * 0.67],
-    [dest.lat, dest.lon]
-  ];
-
-  const baseDist = Math.max(300, Math.round(Math.hypot(dLat, dLon) * 111));
-
-  return [
-    {
-      id: `${vesselId || 'vessel'}-route-b`,
-      name: 'ROUTE B (OPTIMAL)',
-      vessel_id: vesselId,
-      distance: baseDist,
-      eta: `${Math.round(baseDist / (speed * 1.852))}h 05m`,
-      path: routeBPath,
-      recommended: true,
-      iceRisk: 'MODERATE',
-      icebergRisk: 'LOW',
-      weatherRisk: 'MODERATE',
-      overallScore: 92,
-      fuelConsumption: `${Math.round(baseDist * 0.025)} MT`,
-      fuelSavings: '11.8% vs direct',
-      sicExposure: 22,
-      icebergEncounters: 1,
-      safetyMargin: 'OPTIMAL',
-      rioScore: pClass?.includes('PC1') ? 18.2 : pClass?.includes('PC2') ? 14.5 : pClass?.includes('PC3') ? 12.4 : 8.4,
-      reason: `Optimized corridor for ${dest.name || 'Antarctic Base'}. Navigates open leads directly from vessel position.`
-    },
-    {
-      id: `${vesselId || 'vessel'}-route-c`,
-      name: 'ROUTE C (SAFEST)',
-      vessel_id: vesselId,
-      distance: Math.round(baseDist * 1.06),
-      eta: `${Math.round((baseDist * 1.06) / (speed * 1.852))}h 20m`,
-      path: routeCPath,
-      recommended: false,
-      iceRisk: 'LOW',
-      icebergRisk: 'VERY LOW',
-      weatherRisk: 'LOW',
-      overallScore: 84,
-      fuelConsumption: `${Math.round(baseDist * 1.06 * 0.028)} MT`,
-      fuelSavings: 'Safest Margin',
-      sicExposure: 6,
-      icebergEncounters: 0,
-      safetyMargin: 'MAXIMUM',
-      rioScore: pClass?.includes('PC1') ? 24.5 : pClass?.includes('PC2') ? 18.0 : 14.5,
-      reason: 'Maximum safety buffer with zero high-density pack ice transit.'
-    },
-    {
-      id: `${vesselId || 'vessel'}-route-a`,
-      name: 'ROUTE A (FASTEST / DIRECT)',
-      vessel_id: vesselId,
-      distance: Math.round(baseDist * 0.98),
-      eta: `${Math.round((baseDist * 0.98) / (Math.min(speed, 9.2) * 1.852))}h 40m`,
-      path: routeAPath,
-      recommended: false,
-      iceRisk: 'HIGH',
-      icebergRisk: 'HIGH',
-      weatherRisk: 'MODERATE',
-      overallScore: 48,
-      fuelConsumption: `${Math.round(baseDist * 0.98 * 0.034)} MT`,
-      fuelSavings: 'Baseline',
-      sicExposure: 65,
-      icebergEncounters: 3,
-      safetyMargin: 'ELEVATED',
-      rioScore: -2.8,
-      reason: 'Direct maritime path between vessel position and destination mooring.'
-    }
-  ];
-};
-
-// Helper to build realistic geodesic waypoints strictly along the active route line
+// Helper to build realistic geodesic waypoints strictly along the active route line
 const generateWaypointsForRoute = (routePath: [number, number][], routeType: string, _destName: string): Waypoint[] => {
   if (!routePath || routePath.length <= 2) return [];
   
@@ -221,12 +119,23 @@ export const NavigationPage: React.FC = () => {
     setSelectedVesselId,
     selectedIcebergId,
     setSelectedIcebergId,
-    routes: contextRoutes,
+    stations,
+    selectedDestinationId,
+    selectedDestination,
+    setSelectedDestinationId,
+    routes,
     activeRouteId,
-    setActiveRouteId
+    setActiveRouteId,
+    activeRoute: contextActiveRoute,
+    missionId,
+    missionType,
+    setMissionType,
+    emergencyRerouteActive,
+    setEmergencyRerouteActive,
+    whatIfScenario,
+    setWhatIfScenario
   } = useFleet();
 
-  const [localRoutes, setLocalRoutes] = useState<RouteOption[]>([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
 
@@ -244,94 +153,21 @@ export const NavigationPage: React.FC = () => {
   const [selectedOrigin, setSelectedOrigin] = useState(() => {
     return PRESET_ORIGINS.find(p => p.name.toLowerCase().includes('cape town')) || PRESET_ORIGINS[0];
   });
-  
-  const [selectedDestination, setSelectedDestination] = useState(() => {
-    return PRESET_STATIONS.find(p => p.name.toLowerCase().includes('bharati')) || PRESET_STATIONS[0];
-  });
 
   const polarClass = selectedVessel?.polar_class || 'PC5';
-  const [cruisingSpeed, setCruisingSpeed] = useState<number>(() => {
-    return Math.round(selectedVessel?.speed || selectedVessel?.sog || 13.5);
-  });
+  const cruisingSpeed = Math.round(selectedVessel?.speed || selectedVessel?.sog || 13.5);
 
-  // Reset local routes when selected vessel changes so we don't display stale corridors from another ship
+  // Align origin whenever active vessel changes
   useEffect(() => {
-    setLocalRoutes([]);
-    setActiveRouteId('route-b');
-  }, [selectedVessel?.id]);
-
-  // Align destination station whenever active vessel changes
-  useEffect(() => {
-    if (selectedVessel) {
-      if (selectedVessel.speed) setCruisingSpeed(Math.round(selectedVessel.speed));
-
-      // Match destination station
-      if (selectedVessel.destination) {
-        const matchDest = PRESET_STATIONS.find(s => 
-          s.name.toLowerCase().includes(selectedVessel.destination.toLowerCase()) ||
-          selectedVessel.destination.toLowerCase().includes(s.name.toLowerCase().split(' ')[0])
-        );
-        if (matchDest) setSelectedDestination(matchDest);
-      }
-
-      // Match origin
-      if (selectedVessel.voyage_origin) {
-        const matchOrig = PRESET_ORIGINS.find(o => 
-          selectedVessel.voyage_origin?.toLowerCase().includes(o.name.toLowerCase().split(' ')[0])
-        );
-        if (matchOrig) setSelectedOrigin(matchOrig);
-      }
+    if (selectedVessel?.voyage_origin) {
+      const matchOrig = PRESET_ORIGINS.find(o => 
+        selectedVessel.voyage_origin?.toLowerCase().includes(o.name.toLowerCase().split(' ')[0])
+      );
+      if (matchOrig) setSelectedOrigin(matchOrig);
     }
   }, [selectedVessel]);
 
-  // Automatically calculate / update routes whenever selected vessel OR destination station changes
-  useEffect(() => {
-    if (!selectedVessel?.id || !selectedDestination) return;
-    let isCancelled = false;
-    setIsOptimizing(true);
-    api.routes({
-      vesselId: selectedVessel.id,
-      destLat: selectedDestination.lat,
-      destLon: selectedDestination.lon,
-      destName: selectedDestination.name
-    }).then((res) => {
-      if (isCancelled) return;
-      if (res?.routes?.length) {
-        setLocalRoutes(res.routes);
-      }
-    }).catch(() => {})
-    .finally(() => {
-      if (!isCancelled) setIsOptimizing(false);
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [selectedVessel?.id, selectedDestination?.lat, selectedDestination?.lon, selectedDestination?.name]);
-
-  // Use backend routes from FleetContext if available, otherwise generate fallback corridors strictly from vessel
-  const routes: RouteOption[] = useMemo(() => {
-    if (localRoutes.length > 0 && (!localRoutes[0]?.vessel_id || localRoutes[0]?.vessel_id === selectedVessel.id)) {
-      const lastPt = localRoutes[0].path?.[localRoutes[0].path.length - 1];
-      if (!lastPt || (Math.abs(lastPt[0] - selectedDestination.lat) < 0.8 && Math.abs(lastPt[1] - selectedDestination.lon) < 1.5)) {
-        return localRoutes;
-      }
-    }
-    if (contextRoutes && contextRoutes.length > 0 && (!contextRoutes[0]?.vessel_id || contextRoutes[0]?.vessel_id === selectedVessel.id)) {
-      const lastPt = contextRoutes[0].path?.[contextRoutes[0].path.length - 1];
-      if (lastPt && Math.abs(lastPt[0] - selectedDestination.lat) < 0.8 && Math.abs(lastPt[1] - selectedDestination.lon) < 1.5) {
-        return contextRoutes;
-      }
-    }
-    const vOrigin = {
-      name: selectedVessel.name,
-      lat: selectedVessel.latitude,
-      lon: selectedVessel.longitude
-    };
-    return generateCorridors(vOrigin, selectedDestination, cruisingSpeed, polarClass, selectedVessel.id);
-  }, [localRoutes, contextRoutes, selectedVessel, selectedDestination, cruisingSpeed, polarClass]);
-
-  const activeRoute = routes.find(r => r.id === activeRouteId || r.id?.includes(activeRouteId)) || routes[0];
+  const activeRoute = contextActiveRoute || routes.find(r => r.id === activeRouteId || r.id?.includes(activeRouteId)) || routes[0];
 
   // Derive waypoints: prioritize backend RDP waypoints from the route, otherwise calculate along LineString
   const waypoints = useMemo<Waypoint[]>(() => {
@@ -340,8 +176,10 @@ export const NavigationPage: React.FC = () => {
       const validWps = activeRoute.waypoints.filter((wp: any) => {
         const wpLat = wp.latitude ?? wp.lat;
         const wpLon = wp.longitude ?? wp.lon;
+        const destLat = selectedDestination.latitude ?? (selectedDestination as any).lat;
+        const destLon = selectedDestination.longitude ?? (selectedDestination as any).lon;
         const isNearVessel = Math.abs(wpLat - selectedVessel.latitude) < 0.08 && Math.abs(wpLon - selectedVessel.longitude) < 0.08;
-        const isNearDest = Math.abs(wpLat - selectedDestination.lat) < 0.08 && Math.abs(wpLon - selectedDestination.lon) < 0.08;
+        const isNearDest = Math.abs(wpLat - destLat) < 0.08 && Math.abs(wpLon - destLon) < 0.08;
         return !isNearVessel && !isNearDest;
       });
 
@@ -430,9 +268,9 @@ export const NavigationPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
   const destMarker = {
-    latitude: selectedDestination.lat,
-    longitude: selectedDestination.lon,
-    name: selectedDestination.name
+    latitude: selectedDestination.latitude ?? (selectedDestination as any).lat ?? -69.41,
+    longitude: selectedDestination.longitude ?? (selectedDestination as any).lon ?? 76.19,
+    name: selectedDestination.name || 'Antarctic Station'
   };
 
   const riskBadge = (risk: string) => {
@@ -518,17 +356,45 @@ export const NavigationPage: React.FC = () => {
                   <span>Destination Station</span>
                 </label>
                 <select
-                  value={selectedDestination.name}
-                  onChange={(e) => {
-                    const found = PRESET_STATIONS.find(p => p.name === e.target.value);
-                    if (found) setSelectedDestination(found);
-                  }}
+                  value={selectedDestinationId}
+                  onChange={(e) => setSelectedDestinationId(e.target.value)}
                   className="w-full bg-polar-navy/50 border border-slate/30 rounded-sm p-2 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue font-medium"
                 >
-                  {PRESET_STATIONS.map(p => (
-                    <option key={p.name} value={p.name}>{p.name} ({Math.abs(p.lat).toFixed(1)}°S)</option>
+                  {stations.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({Math.abs(p.latitude).toFixed(1)}°S)</option>
                   ))}
                 </select>
+              </div>
+
+              {/* Tactical Diversion & What-If Controls */}
+              <div className="pt-2 space-y-1.5 border-t border-slate/20">
+                <button
+                  type="button"
+                  onClick={() => setEmergencyRerouteActive(!emergencyRerouteActive)}
+                  className={cn(
+                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border",
+                    emergencyRerouteActive
+                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral animate-pulse"
+                      : "bg-polar-navy/40 border-slate/30 text-slate-300 hover:text-white"
+                  )}
+                >
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>{emergencyRerouteActive ? "EMERGENCY DIVERSION ACTIVE" : "SIMULATE HAZARD / DIVERSION"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setWhatIfScenario({ ...whatIfScenario, active: !whatIfScenario.active })}
+                  className={cn(
+                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono transition-all flex items-center justify-center gap-1.5 border",
+                    whatIfScenario.active
+                      ? "bg-amber-500/20 border-amber-500 text-amber-300"
+                      : "bg-polar-navy/30 border-slate/20 text-slate-400 hover:text-slate-200"
+                  )}
+                >
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  <span>{whatIfScenario.active ? "WHAT-IF ACTIVE (+25km Drift, +15% SIC)" : "WHAT-IF SIMULATION"}</span>
+                </button>
               </div>
             </div>
 

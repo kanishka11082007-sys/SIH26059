@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  CheckCircle2, Ship, MapPin, Sparkles
+  CheckCircle2, Ship, MapPin, Sparkles, ShieldAlert, Zap
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from "../../hooks/useApiData";
@@ -38,100 +38,43 @@ export const RouteOptimizationPage: React.FC = () => {
     setSelectedVesselId,
     selectedIcebergId,
     setSelectedIcebergId,
+    stations,
+    selectedDestinationId,
+    selectedDestination,
+    setSelectedDestinationId,
+    routes,
     activeRouteId,
-    setActiveRouteId
+    setActiveRouteId,
+    activeRoute,
+    missionId,
+    missionType,
+    setMissionType,
+    emergencyRerouteActive,
+    setEmergencyRerouteActive,
+    whatIfScenario,
+    setWhatIfScenario
   } = useFleet();
 
-  const [stations, setStations] = useState<any[]>([]);
-  const [selectedDestId, setSelectedDestId] = useState<string>('bharati');
-  const [routes, setRoutes] = useState<RouteOption[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string>('route-b');
   const [bharatiValidation, setBharatiValidation] = useState<any>(null);
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
 
-  // Load Real COMNAP Antarctic Research Stations from API
   useEffect(() => {
-    async function loadStations() {
+    async function loadValidation() {
       try {
-        const [stRes, valRes] = await Promise.all([
-          api.stations({ coastal_only: false }),
-          api.validateBharati()
-        ]);
-        if (stRes?.stations?.length) {
-          setStations(stRes.stations);
-        }
+        const valRes = await api.validateBharati();
         if (valRes) {
           setBharatiValidation(valRes);
         }
       } catch (e) {
-        console.error('Failed to fetch COMNAP stations:', e);
+        console.error('Failed to validate Bharati:', e);
       }
     }
-    loadStations();
+    loadValidation();
   }, []);
 
-  // Synchronize destination station with active vessel default
-  useEffect(() => {
-    if (selectedVessel?.destination_station_id) {
-      setSelectedDestId(selectedVessel.destination_station_id);
-    }
-  }, [selectedVessel?.id, selectedVessel?.destination_station_id]);
-
   const activeVessel = selectedVessel;
-
-  const activeDestination = useMemo(() => {
-    return stations.find(d => d.id === selectedDestId) || stations[0] || {
-      id: 'bharati',
-      name: 'Bharati Research Station',
-      latitude: -69.4068,
-      longitude: 76.1953,
-      region: 'Larsemann Hills (East Antarctica)',
-      operator: 'NCPOR (India)'
-    };
-  }, [stations, selectedDestId]);
-
-  // Load and compute dynamic real routes for current vessel & destination
-  useEffect(() => {
-    async function fetchRoutes() {
-      try {
-        const destLat = activeDestination.latitude ?? (activeDestination as any).lat;
-        const destLon = activeDestination.longitude ?? (activeDestination as any).lon;
-        const res = await api.routes({
-          vesselId: selectedVesselId,
-          destId: selectedDestId,
-          destLat: destLat,
-          destLon: destLon,
-          destName: activeDestination.name
-        });
-        if (res?.routes?.length) {
-          const formatted = res.routes.map((r: any, idx: number) => ({
-            id: r.id || `route-${idx}`,
-            name: r.name || (idx === 1 ? 'ROUTE B (OPTIMAL)' : idx === 2 ? 'ROUTE C (SAFEST)' : 'ROUTE A (FASTEST)'),
-            distance: r.distance || r.distance_km || 1680,
-            eta: r.eta || '32h 05m',
-            recommended: r.recommended ?? (idx === 0 || r.id?.includes('route-b')),
-            iceRisk: r.iceRisk || r.ice_risk || (r.id?.includes('route-a') ? 'HIGH' : r.id?.includes('route-b') ? 'MODERATE' : 'LOW'),
-            fuelConsumption: r.fuelConsumption || r.fuel_estimate || '86 MT',
-            sicExposure: r.sicExposure ?? r.sic_exposure ?? (r.id?.includes('route-a') ? 64 : r.id?.includes('route-b') ? 22 : 6),
-            rioScore: r.rioScore ?? r.rio_score ?? (r.id?.includes('route-a') ? '-2.8' : r.id?.includes('route-b') ? '+8.4' : '+14.8'),
-            reason: r.reason || `Calculated corridor for ${activeVessel.name} towards ${activeDestination.name}.`,
-            path: r.path,
-            costs: r.costs || r.cost_breakdown || {},
-            cost_breakdown: r.cost_breakdown || r.costs || {}
-          }));
-          setRoutes(formatted);
-          const rec = formatted.find(r => r.recommended) || formatted[0];
-          if (rec) {
-            setSelectedRouteId(rec.id);
-            setActiveRouteId(rec.id);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to fetch routes:', e);
-      }
-    }
-    fetchRoutes();
-  }, [selectedVesselId, selectedDestId, activeVessel.latitude, activeVessel.longitude, activeDestination.latitude, activeDestination.longitude]);
+  const activeDestination = selectedDestination;
 
   const handleSetActiveRoute = (routeId: string) => {
     setActiveRouteId(routeId);
@@ -210,8 +153,8 @@ export const RouteOptimizationPage: React.FC = () => {
                   <span>Destination Station</span>
                 </label>
                 <select
-                  value={selectedDestId}
-                  onChange={(e) => setSelectedDestId(e.target.value)}
+                  value={selectedDestinationId}
+                  onChange={(e) => setSelectedDestinationId(e.target.value)}
                   className="w-full bg-polar-navy/50 border border-slate/30 rounded-sm p-2 text-xs text-ice-white font-mono focus:outline-none focus:border-glacial-blue font-medium"
                 >
                   {stations.map((d) => (
@@ -220,6 +163,37 @@ export const RouteOptimizationPage: React.FC = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* Tactical Emergency Diversion & What-If Controls */}
+              <div className="pt-2 space-y-1.5 border-t border-slate/20">
+                <button
+                  type="button"
+                  onClick={() => setEmergencyRerouteActive(!emergencyRerouteActive)}
+                  className={cn(
+                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border",
+                    emergencyRerouteActive
+                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral animate-pulse"
+                      : "bg-polar-navy/40 border-slate/30 text-slate-300 hover:text-white"
+                  )}
+                >
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>{emergencyRerouteActive ? "EMERGENCY DIVERSION ACTIVE" : "SIMULATE HAZARD / EMERGENCY"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setWhatIfScenario({ ...whatIfScenario, active: !whatIfScenario.active })}
+                  className={cn(
+                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono transition-all flex items-center justify-center gap-1.5 border",
+                    whatIfScenario.active
+                      ? "bg-amber-500/20 border-amber-500 text-amber-300"
+                      : "bg-polar-navy/30 border-slate/20 text-slate-400 hover:text-slate-200"
+                  )}
+                >
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  <span>{whatIfScenario.active ? "WHAT-IF ACTIVE (+25km Drift, +15% SIC)" : "WHAT-IF SIMULATION"}</span>
+                </button>
               </div>
 
               {/* Clean Telemetry Summary */}
@@ -236,7 +210,7 @@ export const RouteOptimizationPage: React.FC = () => {
                     {Math.abs(activeDestination.latitude ?? (activeDestination as any).lat ?? 0).toFixed(2)}°{(activeDestination.latitude ?? (activeDestination as any).lat ?? 0) >= 0 ? 'N' : 'S'}, {Math.abs(activeDestination.longitude ?? (activeDestination as any).lon ?? 0).toFixed(2)}°{(activeDestination.longitude ?? (activeDestination as any).lon ?? 0) >= 0 ? 'E' : 'W'}
                   </span>
                 </div>
-                {selectedDestId === 'bharati' && bharatiValidation?.is_authoritative_match && (
+                {selectedDestinationId === 'bharati' && bharatiValidation?.is_authoritative_match && (
                   <div className="flex items-center gap-1 text-[10px] text-risk-safe border-t border-slate/20 pt-1 mt-1">
                     <CheckCircle2 className="w-3 h-3 text-risk-safe shrink-0" />
                     <span>NCPOR Verified (69°24.41′S, 76°11.72′E)</span>

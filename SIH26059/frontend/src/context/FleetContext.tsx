@@ -276,17 +276,65 @@ export const CANONICAL_FLEET: CanonicalVessel[] = [
   }
 ];
 
+export interface AntarcticStation {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  region?: string;
+  operator?: string;
+  country?: string;
+  coastal_access?: boolean;
+}
+
+export const CANONICAL_STATIONS: AntarcticStation[] = [
+  { id: 'bharati', name: 'Bharati Station (Larsemann Hills)', latitude: -69.4068, longitude: 76.1953, region: 'East Antarctica', operator: 'NCPOR (India)', country: 'India', coastal_access: true },
+  { id: 'maitri', name: 'Maitri Station (Schirmacher Oasis)', latitude: -70.7700, longitude: 11.7300, region: 'Queen Maud Land', operator: 'NCPOR (India)', country: 'India', coastal_access: true },
+  { id: 'neumayer', name: 'Neumayer Station III (Atka Bay)', latitude: -70.6700, longitude: -8.2700, region: 'Weddell Sea Sector', operator: 'AWI (Germany)', country: 'Germany', coastal_access: true },
+  { id: 'mcmurdo', name: 'McMurdo Station (Ross Island)', latitude: -77.8500, longitude: 166.6700, region: 'Ross Sea', operator: 'USAP (USA)', country: 'USA', coastal_access: true },
+  { id: 'rothera', name: 'Rothera Research Station (Adelaide Island)', latitude: -67.5700, longitude: -68.1300, region: 'Antarctic Peninsula', operator: 'BAS (UK)', country: 'UK', coastal_access: true },
+  { id: 'casey', name: 'Casey Station (Wilkes Land)', latitude: -66.2800, longitude: 110.5300, region: 'Wilkes Land', operator: 'AAD (Australia)', country: 'Australia', coastal_access: true },
+  { id: 'davis', name: 'Davis Station (Vestfold Hills)', latitude: -68.5800, longitude: 77.9700, region: 'Prydz Bay Sector', operator: 'AAD (Australia)', country: 'Australia', coastal_access: true },
+  { id: 'comandante_ferraz', name: 'Comandante Ferraz Station (King George Island)', latitude: -62.0833, longitude: -58.3833, region: 'South Shetland Islands', operator: 'PROANTAR (Brazil)', country: 'Brazil', coastal_access: true }
+];
+
+export type MissionType = 'RESEARCH' | 'SUPPLY' | 'EMERGENCY' | 'ICE_OBSERVATION';
+export type OptimizationPriority = 'BALANCED' | 'SAFEST' | 'FASTEST' | 'FUEL';
+
 interface FleetContextType {
   fleet: CanonicalVessel[];
   selectedVesselId: string;
   selectedVessel: CanonicalVessel;
   setSelectedVesselId: (id: string) => void;
+  stations: AntarcticStation[];
+  selectedDestinationId: string;
+  selectedDestination: AntarcticStation;
+  setSelectedDestinationId: (id: string) => void;
+  missionId: string;
+  missionType: MissionType;
+  setMissionType: (type: MissionType) => void;
+  optimizationPriority: OptimizationPriority;
+  setOptimizationPriority: (p: OptimizationPriority) => void;
   selectedIcebergId: string | null;
   setSelectedIcebergId: (id: string | null) => void;
   routes: RouteOption[];
   activeRouteId: string;
   setActiveRouteId: (id: string) => void;
   activeRoute: RouteOption | null;
+  emergencyRerouteActive: boolean;
+  setEmergencyRerouteActive: (active: boolean) => void;
+  whatIfScenario: {
+    active: boolean;
+    icebergDriftOffsetKm: number;
+    sicIncreasePct: number;
+    windGustKnots: number;
+  };
+  setWhatIfScenario: React.Dispatch<React.SetStateAction<{
+    active: boolean;
+    icebergDriftOffsetKm: number;
+    sicIncreasePct: number;
+    windGustKnots: number;
+  }>>;
   isLoading: boolean;
   refreshFleet: () => Promise<void>;
 }
@@ -294,12 +342,30 @@ interface FleetContextType {
 const FleetContext = createContext<FleetContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'polarnav_selected_vessel_id';
+const DEST_STORAGE_KEY = 'polarnav_selected_destination_id';
+const MISSION_TYPE_KEY = 'polarnav_mission_type';
 
 export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [fleet, setFleet] = useState<CanonicalVessel[]>(CANONICAL_FLEET);
+  const [stations, setStations] = useState<AntarcticStation[]>(CANONICAL_STATIONS);
   const [selectedVesselId, setSelectedVesselIdState] = useState<string>(() => {
     return localStorage.getItem(STORAGE_KEY) || 'rv_sagar_nidhi';
   });
+  const [selectedDestinationId, setSelectedDestinationIdState] = useState<string>(() => {
+    return localStorage.getItem(DEST_STORAGE_KEY) || 'bharati';
+  });
+  const [missionType, setMissionTypeState] = useState<MissionType>(() => {
+    return (localStorage.getItem(MISSION_TYPE_KEY) as MissionType) || 'RESEARCH';
+  });
+  const [optimizationPriority, setOptimizationPriority] = useState<OptimizationPriority>('BALANCED');
+  const [emergencyRerouteActive, setEmergencyRerouteActive] = useState<boolean>(false);
+  const [whatIfScenario, setWhatIfScenario] = useState({
+    active: false,
+    icebergDriftOffsetKm: 25.0,
+    sicIncreasePct: 15.0,
+    windGustKnots: 20.0
+  });
+
   const [selectedIcebergId, setSelectedIcebergId] = useState<string | null>(null);
   const [routes, setRoutes] = useState<RouteOption[]>([]);
   const [activeRouteId, setActiveRouteId] = useState<string>('route-b');
@@ -309,6 +375,17 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setSelectedVesselId = useCallback((id: string) => {
     setSelectedVesselIdState(id);
     localStorage.setItem(STORAGE_KEY, id);
+  }, []);
+
+  // Set selected destination with persistence
+  const setSelectedDestinationId = useCallback((id: string) => {
+    setSelectedDestinationIdState(id);
+    localStorage.setItem(DEST_STORAGE_KEY, id);
+  }, []);
+
+  const setMissionType = useCallback((type: MissionType) => {
+    setMissionTypeState(type);
+    localStorage.setItem(MISSION_TYPE_KEY, type);
   }, []);
 
   // Fetch canonical fleet from backend
@@ -363,16 +440,27 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return fleet.find(v => v.id === selectedVesselId || String(v.mmsi) === selectedVesselId) || fleet[0] || CANONICAL_FLEET[0];
   }, [fleet, selectedVesselId]);
 
-  // Fetch / update corridors reactively for the selected vessel
+  // Derive active selected destination
+  const selectedDestination = useMemo(() => {
+    return stations.find(s => s.id === selectedDestinationId) || stations[0] || CANONICAL_STATIONS[0];
+  }, [stations, selectedDestinationId]);
+
+  // Unified canonical mission ID
+  const missionId = useMemo(() => {
+    return `MIS-2026-${(selectedVessel?.id || 'VESSEL').replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}`;
+  }, [selectedVessel?.id]);
+
+  // Fetch / update corridors reactively for the selected vessel AND destination
   useEffect(() => {
-    if (!selectedVessel) return;
+    if (!selectedVessel || !selectedDestination) return;
     
     let isCancelled = false;
     api.routes({
       vesselId: selectedVessel.id,
-      destLat: selectedVessel.dest_lat,
-      destLon: selectedVessel.dest_lon,
-      destName: selectedVessel.destination
+      destId: selectedDestination.id,
+      destLat: selectedDestination.latitude,
+      destLon: selectedDestination.longitude,
+      destName: selectedDestination.name
     }).then((res) => {
       if (isCancelled) return;
       if (res?.routes?.length) {
@@ -405,7 +493,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => {
       isCancelled = true;
     };
-  }, [selectedVessel]);
+  }, [selectedVessel?.id, selectedDestination?.id, selectedDestination?.latitude, selectedDestination?.longitude, emergencyRerouteActive, whatIfScenario.active]);
 
   // Derive active route
   const activeRoute = useMemo(() => {
@@ -417,15 +505,50 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     selectedVesselId,
     selectedVessel,
     setSelectedVesselId,
+    stations,
+    selectedDestinationId,
+    selectedDestination,
+    setSelectedDestinationId,
+    missionId,
+    missionType,
+    setMissionType,
+    optimizationPriority,
+    setOptimizationPriority,
     selectedIcebergId,
     setSelectedIcebergId,
     routes,
     activeRouteId,
     setActiveRouteId,
     activeRoute,
+    emergencyRerouteActive,
+    setEmergencyRerouteActive,
+    whatIfScenario,
+    setWhatIfScenario,
     isLoading,
     refreshFleet
-  }), [fleet, selectedVesselId, selectedVessel, setSelectedVesselId, selectedIcebergId, routes, activeRouteId, activeRoute, isLoading, refreshFleet]);
+  }), [
+    fleet,
+    selectedVesselId,
+    selectedVessel,
+    setSelectedVesselId,
+    stations,
+    selectedDestinationId,
+    selectedDestination,
+    setSelectedDestinationId,
+    missionId,
+    missionType,
+    setMissionType,
+    optimizationPriority,
+    setOptimizationPriority,
+    selectedIcebergId,
+    routes,
+    activeRouteId,
+    activeRoute,
+    emergencyRerouteActive,
+    whatIfScenario,
+    isLoading,
+    refreshFleet
+  ]);
 
   return (
     <FleetContext.Provider value={value}>

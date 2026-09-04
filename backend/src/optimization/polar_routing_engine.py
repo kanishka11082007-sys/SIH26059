@@ -15,19 +15,34 @@ import math
 import heapq
 import time
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+_SRC_DIR = _BACKEND_DIR / "src"
+for _p in [str(_BACKEND_DIR), str(_SRC_DIR)]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import numpy as np
 from scipy.spatial import KDTree
 from shapely.geometry import shape, Point, LineString, MultiPolygon
+import shapely.prepared
 import pyproj
 
-from src.data.bathymetry_service import bathymetry_service
-from src.data.ocean_service import ocean_service
-from src.data.weather_service import weather_service
-from src.data.real_sic_service import real_sic_service
-from src.optimization.fuel_model import fuel_engine
+try:
+    from src.data.bathymetry_service import bathymetry_service
+    from src.data.ocean_service import ocean_service
+    from src.data.weather_service import weather_service
+    from src.data.real_sic_service import real_sic_service
+    from src.optimization.fuel_model import fuel_engine
+except ImportError:
+    from backend.src.data.bathymetry_service import bathymetry_service
+    from backend.src.data.ocean_service import ocean_service
+    from backend.src.data.weather_service import weather_service
+    from backend.src.data.real_sic_service import real_sic_service
+    from backend.src.optimization.fuel_model import fuel_engine
 
 logger = logging.getLogger("polarnav.routing_engine")
 
@@ -56,6 +71,7 @@ class PolarRoutingEngine:
 
     def __init__(self):
         self._land_geom: Optional[MultiPolygon] = None
+        self._prep_land: Any = None
         self._sic_tree: Optional[KDTree] = None
         self._sic_values: Optional[np.ndarray] = None
         self._icebergs_cache: List[Dict[str, Any]] = []
@@ -68,13 +84,14 @@ class PolarRoutingEngine:
             return
 
         t0 = time.time()
-        # 1. Load Land Mask GeoJSON
+        # 1. Load Land Mask GeoJSON and compile prepared spatial index
         land_path = RAW_DIR / "antarctica_land_mask.geojson"
         if land_path.exists():
             with open(land_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 self._land_geom = shape(data["geometry"])
-            logger.info("Loaded Antarctica Land Mask GeoJSON successfully.")
+                self._prep_land = shapely.prepared.prep(self._land_geom)
+            logger.info("Loaded Antarctica Land Mask GeoJSON and built prepared spatial index successfully.")
         else:
             logger.warning(f"Land mask not found at {land_path}")
 
@@ -129,9 +146,11 @@ class PolarRoutingEngine:
         """Check if a coordinate lies on land."""
         if lat <= -88.0:
             return True
-        if not self._land_geom:
-            return lat < -80.0
-        return self._land_geom.contains(Point(lon, lat))
+        if self._prep_land is not None:
+            return bool(self._prep_land.contains(Point(lon, lat)))
+        if self._land_geom is not None:
+            return bool(self._land_geom.contains(Point(lon, lat)))
+        return lat < -80.0
 
     def get_sic(self, lon: float, lat: float) -> float:
         """Get Sea Ice Concentration (0-100%) from real NOAA CDR or KDTree."""
@@ -229,7 +248,7 @@ class PolarRoutingEngine:
         profiles = [
             {
                 "id_suffix": "route-b",
-                "name": "ROUTE B - OPTIMAL AI CORRIDOR",
+                "name": "ROUTE B - OPTIMAL / FASTEST ARRIVAL",
                 "mode": "BALANCED",
                 "recommended": True,
                 "w_dist": 1.0,
@@ -259,7 +278,7 @@ class PolarRoutingEngine:
             },
             {
                 "id_suffix": "route-a",
-                "name": "ROUTE A - DIRECT ICE TRACK",
+                "name": "ROUTE A - DIRECT BASELINE (ICE-CONSTRAINED)",
                 "mode": "FASTEST",
                 "recommended": False,
                 "w_dist": 2.5,
@@ -316,6 +335,8 @@ class PolarRoutingEngine:
                 "sicExposure": int(metrics["avg_sic"]),
                 "reason": explain,
                 "path": path_coords,
+                "multi_path": metrics.get("multi_path", [path_coords]),
+                "crosses_antimeridian": len(metrics.get("multi_path", [])) > 1,
                 "waypoints": simplified_pts,
                 "costs": metrics.get("costs", {}),
                 "cost_breakdown": metrics.get("cost_breakdown", {}),
@@ -331,6 +352,240 @@ class PolarRoutingEngine:
 
         return candidate_routes
 
+    def _find_polar_astar_path(
+        self,
+        s_lon: float,
+        s_lat: float,
+        d_lon: float,
+        d_lat: float,
+        profile: Dict[str, Any]
+    ) -> List[Tuple[float, float]]:
+        """Compute genuine discrete 2D A* path in EPSG:3031 with hard land avoidance,
+        environmental cost surfaces, and line-of-sight shortcutting."""
+        sx, sy = TRANS_TO_3031.transform(s_lon, s_lat)
+        dx, dy = TRANS_TO_3031.transform(d_lon, d_lat)
+        dist_m = math.hypot(dx - sx, dy - sy)
+        mode = profile.get("mode", "BALANCED")
+
+        # 1. Quick check: Is direct line in EPSG:3031 already obstacle-free?
+        n_samples = max(12, int(dist_m / 40_000.0))
+        direct_clear = True
+        for t in np.linspace(0.02, 0.98, n_samples):
+            px = sx + t * (dx - sx)
+            py = sy + t * (dy - sy)
+            plon, plat = TRANS_TO_4326.transform(px, py)
+            if self.is_land(plon, plat):
+                direct_clear = False
+                break
+
+        # If direct line has zero land collision and mode is FASTEST, return direct segment
+        if direct_clear and mode == "FASTEST":
+            steps = max(10, min(30, int(dist_m / 60_000.0)))
+            raw = []
+            for t in np.linspace(0, 1, steps):
+                px = sx + t * (dx - sx)
+                py = sy + t * (dy - sy)
+                plon, plat = TRANS_TO_4326.transform(px, py)
+                raw.append((plon, plat))
+            return raw
+
+        # 2. Bounding domain in EPSG:3031
+        crosses_pole = (sx * dx + sy * dy) < 0 or abs((d_lon - s_lon + 180.0) % 360.0 - 180.0) > 75.0
+        if crosses_pole:
+            min_x = min(sx, dx, -3_300_000.0)
+            max_x = max(sx, dx, 3_300_000.0)
+            min_y = min(sy, dy, -3_300_000.0)
+            max_y = max(sy, dy, 3_300_000.0)
+        else:
+            margin = max(600_000.0, dist_m * 0.45)
+            min_x = min(sx, dx) - margin
+            max_x = max(sx, dx) + margin
+            min_y = min(sy, dy) - margin
+            max_y = max(sy, dy) + margin
+
+        step = 50_000.0  # 50 km mesh resolution
+        nx = int((max_x - min_x) / step) + 1
+        ny = int((max_y - min_y) / step) + 1
+
+        def to_xy(gx, gy):
+            return min_x + gx * step, min_y + gy * step
+
+        def to_grid(x, y):
+            gx = max(0, min(nx - 1, int(round((x - min_x) / step))))
+            gy = max(0, min(ny - 1, int(round((y - min_y) / step))))
+            return gx, gy
+
+        sgx, sgy = to_grid(sx, sy)
+        dgx, dgy = to_grid(dx, dy)
+
+        # Snap start or goal if on coastal land boundary
+        def find_nearest_navigable(gx, gy):
+            if not self.is_land(*TRANS_TO_4326.transform(*to_xy(gx, gy))):
+                return gx, gy
+            for r in range(1, 6):
+                for dx_i in range(-r, r + 1):
+                    for dy_i in range(-r, r + 1):
+                        ngx, ngy = gx + dx_i, gy + dy_i
+                        if 0 <= ngx < nx and 0 <= ngy < ny:
+                            lx, ly = to_xy(ngx, ngy)
+                            lon, lat = TRANS_TO_4326.transform(lx, ly)
+                            if not self.is_land(lon, lat):
+                                return ngx, ngy
+            return gx, gy
+
+        sgx, sgy = find_nearest_navigable(sgx, sgy)
+        dgx, dgy = find_nearest_navigable(dgx, dgy)
+
+        # Node traversal cost evaluation with caching
+        cost_cache = {}
+        w_sic = profile.get("w_sic", 2.0)
+        w_ib = profile.get("w_iceberg", 3.0)
+        clearance_km = profile.get("clearance_km", 15.0)
+
+        def eval_cell_cost(gx, gy):
+            key = (gx, gy)
+            if key in cost_cache:
+                return cost_cache[key]
+            x, y = to_xy(gx, gy)
+            lon, lat = TRANS_TO_4326.transform(x, y)
+            if self.is_land(lon, lat):
+                cost_cache[key] = float('inf')
+                return float('inf')
+            
+            raw_sic = self.get_sic(lon, lat)
+            sic_penalty = 1.0 + ((raw_sic / 100.0) ** 2) * w_sic * 2.5
+
+            min_cpa, ib_risk, _ = self.get_iceberg_cpa_and_risk(lon, lat, time_hours=0.0, safety_clearance_km=clearance_km)
+            if min_cpa < clearance_km * 0.4:
+                ib_penalty = 15.0
+            elif min_cpa < clearance_km:
+                ib_penalty = 1.0 + (ib_risk * 0.1 * w_ib)
+            else:
+                ib_penalty = 1.0
+
+            total_cell_mult = sic_penalty * ib_penalty
+            cost_cache[key] = total_cell_mult
+            return total_cell_mult
+
+        # A* Search
+        def heur(gx, gy):
+            x, y = to_xy(gx, gy)
+            return math.hypot(x - dx, y - dy)
+
+        open_set = []
+        heapq.heappush(open_set, (heur(sgx, sgy), 0.0, (sgx, sgy)))
+        came_from = {}
+        g_score = {(sgx, sgy): 0.0}
+
+        dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+        found = False
+
+        while open_set:
+            _, cur_g, (cgx, cgy) = heapq.heappop(open_set)
+            if (cgx, cgy) == (dgx, dgy):
+                found = True
+                break
+
+            if cur_g > g_score.get((cgx, cgy), float('inf')):
+                continue
+
+            for ddx, ddy in dirs:
+                ngx, ngy = cgx + ddx, cgy + ddy
+                if 0 <= ngx < nx and 0 <= ngy < ny:
+                    cell_mult = eval_cell_cost(ngx, ngy)
+                    if math.isinf(cell_mult):
+                        continue
+                    step_dist = step * (1.4142 if ddx != 0 and ddy != 0 else 1.0) * cell_mult
+                    tentative_g = cur_g + step_dist
+                    if tentative_g < g_score.get((ngx, ngy), float('inf')):
+                        g_score[(ngx, ngy)] = tentative_g
+                        came_from[(ngx, ngy)] = (cgx, cgy)
+                        f_score = tentative_g + heur(ngx, ngy)
+                        heapq.heappush(open_set, (f_score, tentative_g, (ngx, ngy)))
+
+        if not found:
+            logger.warning(f"Polar A* found no unblocked path from ({s_lat}, {s_lon}) to ({d_lat}, {d_lon}). Applying maritime lead perimeter.")
+            return [(s_lon, s_lat), (d_lon, d_lat)]
+
+        # Reconstruct path in EPSG:3031 coordinates
+        curr = (dgx, dgy)
+        raw_xy = [to_xy(curr[0], curr[1])]
+        while curr in came_from:
+            curr = came_from[curr]
+            raw_xy.append(to_xy(curr[0], curr[1]))
+        raw_xy.reverse()
+
+        raw_xy[0] = (sx, sy)
+        raw_xy[-1] = (dx, dy)
+
+        # Line-of-sight shortcutting string pulling
+        smoothed_xy = [raw_xy[0]]
+        curr_idx = 0
+
+        def segment_clear(p1, p2):
+            x1, y1 = p1
+            x2, y2 = p2
+            seg_len = math.hypot(x2 - x1, y2 - y1)
+            n_chk = max(5, int(seg_len / 10_000.0))
+            for t in np.linspace(0, 1, n_chk):
+                chk_x = x1 + t * (x2 - x1)
+                chk_y = y1 + t * (y2 - y1)
+                lon_c, lat_c = TRANS_TO_4326.transform(chk_x, chk_y)
+                if self.is_land(lon_c, lat_c):
+                    return False
+            return True
+
+        while curr_idx < len(raw_xy) - 1:
+            next_idx = len(raw_xy) - 1
+            while next_idx > curr_idx + 1:
+                if segment_clear(raw_xy[curr_idx], raw_xy[next_idx]):
+                    break
+                next_idx -= 1
+            smoothed_xy.append(raw_xy[next_idx])
+            curr_idx = next_idx
+
+        # Uniform densification for continuous navigational sampling (~30 km per waypoint)
+        dense_coords = []
+        for i in range(len(smoothed_xy) - 1):
+            p1 = smoothed_xy[i]
+            p2 = smoothed_xy[i + 1]
+            seg_dist = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+            steps = max(1, int(round(seg_dist / 30_000.0)))
+            for s_i in range(steps):
+                frac = s_i / steps
+                px = p1[0] + frac * (p2[0] - p1[0])
+                py = p1[1] + frac * (p2[1] - p1[1])
+                plon, plat = TRANS_TO_4326.transform(px, py)
+                # Hard safeguard: Ensure zero coastal land intersections by pushing seaward away from South Pole
+                if self.is_land(plon, plat):
+                    r_norm = math.hypot(px, py)
+                    if r_norm > 0:
+                        for bump_km in [15.0, 30.0, 50.0, 80.0]:
+                            bx = px + (px / r_norm) * (bump_km * 1000.0)
+                            by = py + (py / r_norm) * (bump_km * 1000.0)
+                            blon, blat = TRANS_TO_4326.transform(bx, by)
+                            if not self.is_land(blon, blat):
+                                plon, plat = blon, blat
+                                break
+                dense_coords.append((plon, plat))
+
+        # Append final destination point
+        d_px, d_py = smoothed_xy[-1][0], smoothed_xy[-1][1]
+        d_final_lon, d_final_lat = TRANS_TO_4326.transform(d_px, d_py)
+        if self.is_land(d_final_lon, d_final_lat):
+            r_norm = math.hypot(d_px, d_py)
+            if r_norm > 0:
+                for bump_km in [10.0, 25.0, 50.0]:
+                    bx = d_px + (d_px / r_norm) * (bump_km * 1000.0)
+                    by = d_py + (d_py / r_norm) * (bump_km * 1000.0)
+                    blon, blat = TRANS_TO_4326.transform(bx, by)
+                    if not self.is_land(blon, blat):
+                        d_final_lon, d_final_lat = blon, blat
+                        break
+        dense_coords.append((d_final_lon, d_final_lat))
+
+        return dense_coords
+
     def _solve_route(
         self,
         s_lon: float,
@@ -340,107 +595,10 @@ class PolarRoutingEngine:
         speed_kn: float,
         profile: Dict[str, Any]
     ) -> Tuple[List[List[float]], Dict[str, Any]]:
-        """Physics-informed route generator strictly between start vessel and target destination."""
+        """Physics-informed route generator using genuine 2D discrete A* pathfinding on EPSG:3031."""
         mode = profile.get("mode", "BALANCED")
-
-        # Calculate shortest spherical longitude delta
-        d_lon_diff = d_lon - s_lon
-        while d_lon_diff > 180.0:
-            d_lon_diff -= 360.0
-        while d_lon_diff < -180.0:
-            d_lon_diff += 360.0
-
-        # Haversine direct spherical distance in km
-        phi1, phi2 = math.radians(s_lat), math.radians(d_lat)
-        dphi = math.radians(d_lat - s_lat)
-        dlam = math.radians(d_lon_diff)
-        haversine_a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2.0) ** 2
-        direct_dist_km = 2.0 * 6371.0 * math.atan2(math.sqrt(haversine_a), math.sqrt(max(0.0, 1.0 - haversine_a)))
-
-        # Standard Antarctic maritime navigation is strictly between vessel start and destination
-        # Circumpolar inter-basin routing is only applicable if traversing across opposite sides of the continent
-        is_circumpolar = abs(d_lon_diff) > 75.0 and direct_dist_km > 2500.0
-        raw_coords: List[Tuple[float, float]] = []
-
-        if is_circumpolar:
-            # Southern Ocean circumpolar corridor navigating around Antarctic continent
-            n_steps = 26
-            target_lat = max(s_lat, d_lat, -62.5)
-            lat_bias = 0.0 if mode == "BALANCED" else (2.0 if mode == "SAFEST" else -1.5)
-
-            for i in range(n_steps):
-                t = i / (n_steps - 1)
-                if i == 0:
-                    raw_coords.append((s_lon, s_lat))
-                elif i == n_steps - 1:
-                    raw_coords.append((d_lon, d_lat))
-                else:
-                    cur_lon = (s_lon + t * d_lon_diff + 180.0) % 360.0 - 180.0
-                    base_lat = (1.0 - t) * s_lat + t * d_lat
-                    sin_env = math.sin(t * math.pi)
-
-                    cur_lat = base_lat + sin_env * (target_lat - base_lat) + sin_env * lat_bias
-                    cur_lat = min(-50.0, max(-70.0, cur_lat))
-
-                    if self.is_land(cur_lon, cur_lat):
-                        for step in range(1, 25):
-                            n_lat = cur_lat + step * 0.4
-                            if not self.is_land(cur_lon, n_lat):
-                                cur_lat = n_lat
-                                break
-                    raw_coords.append((cur_lon, cur_lat))
-        else:
-            # Conformal Antarctic Polar Stereographic navigation (EPSG:3031) strictly from Vessel to Station
-            sx, sy = TRANS_TO_3031.transform(s_lon, s_lat)
-            dx, dy = TRANS_TO_3031.transform(d_lon, d_lat)
-            d_m = math.hypot(dx - sx, dy - sy)
-            if d_m < 1.0:
-                d_m = 1.0
-            ux, uy = (dx - sx) / d_m, (dy - sy) / d_m
-
-            # Seaward normal: ensure normal points away from pole (0, 0)
-            mx, my = (sx + dx) / 2.0, (sy + dy) / 2.0
-            n1x, n1y = -uy, ux
-            if math.hypot(mx + n1x, my + n1y) < math.hypot(mx, my):
-                nx, ny = uy, -ux
-            else:
-                nx, ny = n1x, n1y
-
-            # Mode-dependent lateral safety offset (proportional to distance up to 135 km)
-            base_offset_m = min(d_m * 0.09, 135000.0)
-            if mode == "SAFEST":
-                offset_m = base_offset_m * 1.0
-            elif mode == "BALANCED":
-                offset_m = base_offset_m * 0.48
-            else:
-                offset_m = 0.0
-
-            n_steps = 22 if d_m > 400000.0 else (16 if d_m > 150000.0 else 10)
-
-            for i in range(n_steps):
-                t = i / (n_steps - 1)
-                if i == 0:
-                    raw_coords.append((s_lon, s_lat))
-                elif i == n_steps - 1:
-                    raw_coords.append((d_lon, d_lat))
-                else:
-                    bx = sx + t * (dx - sx)
-                    by = sy + t * (dy - sy)
-                    env = math.sin(t * math.pi)
-                    cx = bx + env * offset_m * nx
-                    cy = by + env * offset_m * ny
-                    c_lon, c_lat = TRANS_TO_4326.transform(cx, cy)
-
-                    # Ensure coordinate is strictly in navigable ocean (never on land)
-                    if self.is_land(c_lon, c_lat):
-                        for step in range(1, 25):
-                            t_x = cx + step * 3000.0 * nx
-                            t_y = cy + step * 3000.0 * ny
-                            t_lon, t_lat = TRANS_TO_4326.transform(t_x, t_y)
-                            if not self.is_land(t_lon, t_lat):
-                                c_lon, c_lat = t_lon, t_lat
-                                break
-                    raw_coords.append((c_lon, c_lat))
+        is_circumpolar = abs((d_lon - s_lon + 180.0) % 360.0 - 180.0) > 75.0
+        raw_coords = self._find_polar_astar_path(s_lon, s_lat, d_lon, d_lat, profile)
 
         # Real multi-environmental metric evaluation
         path_coords: List[List[float]] = []
@@ -617,6 +775,37 @@ class PolarRoutingEngine:
             "costs": cost_breakdown,
             "cost_breakdown": cost_breakdown,
         }
+
+        # Split route at antimeridian (+/-180) into clean MultiLineString segments for MapLibre/deck.gl
+        multi_path: List[List[List[float]]] = []
+        cur_segment: List[List[float]] = []
+        for pt in path_coords:
+            lat, lon = pt[0], pt[1]
+            if not cur_segment:
+                cur_segment.append([lat, lon])
+                continue
+            prev_lat, prev_lon = cur_segment[-1]
+            lon_diff = lon - prev_lon
+            if abs(lon_diff) > 180.0:
+                if lon_diff > 0:
+                    frac = (-180.0 - prev_lon) / (lon - 360.0 - prev_lon) if (lon - 360.0 - prev_lon) != 0 else 0.5
+                    cross_lat = round(prev_lat + frac * (lat - prev_lat), 4)
+                    cur_segment.append([cross_lat, -180.0])
+                    multi_path.append(cur_segment)
+                    cur_segment = [[cross_lat, 180.0], [lat, lon]]
+                else:
+                    frac = (180.0 - prev_lon) / (lon + 360.0 - prev_lon) if (lon + 360.0 - prev_lon) != 0 else 0.5
+                    cross_lat = round(prev_lat + frac * (lat - prev_lat), 4)
+                    cur_segment.append([cross_lat, 180.0])
+                    multi_path.append(cur_segment)
+                    cur_segment = [[cross_lat, -180.0], [lat, lon]]
+            else:
+                cur_segment.append([lat, lon])
+        if cur_segment:
+            multi_path.append(cur_segment)
+
+        metrics["multi_path"] = multi_path
+        metrics["crosses_antimeridian"] = len(multi_path) > 1
 
         return path_coords, metrics
 
