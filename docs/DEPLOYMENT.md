@@ -1,8 +1,8 @@
 # PolarNav — Production Deployment Guide (Vercel + Render)
 
 ## 1. Environment Architecture
-- **Frontend**: Deployed on **Vercel**
-- **Backend**: Deployed on **Render** (Web Service, Python 3.11)
+- **Frontend**: Deployed on **Vercel** ([https://frontend-pearl-nine-74.vercel.app/](https://frontend-pearl-nine-74.vercel.app/))
+- **Backend**: Deployed on **Render** ([https://sih-2026-059.onrender.com](https://sih-2026-059.onrender.com))
 
 ## 2. Environment Variables
 

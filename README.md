@@ -3,7 +3,7 @@
 
 <div align="center">
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-000000.svg?style=for-the-badge&logo=vercel&logoColor=white)](https://polarnav.vercel.app)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-000000.svg?style=for-the-badge&logo=vercel&logoColor=white)](https://frontend-pearl-nine-74.vercel.app/)
 [![Backend API](https://img.shields.io/badge/Backend%20API-Render-46E3B7.svg?style=for-the-badge&logo=render&logoColor=white)](https://sih-2026-059.onrender.com)
 [![Interactive Docs](https://img.shields.io/badge/Swagger%20Docs-FastAPI-009688.svg?style=for-the-badge&logo=fastapi&logoColor=white)](https://sih-2026-059.onrender.com/docs)
 [![Database](https://img.shields.io/badge/Database-Supabase%20Postgres-3ECF8E.svg?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
@@ -27,12 +27,10 @@
 
 | Service | Platform | Endpoint / URL | Description |
 | :--- | :--- | :--- | :--- |
-| **Frontend Web Application** | **Vercel** | [polarnav.vercel.app](https://polarnav.vercel.app) | Production React 19 + MapLibre/Deck.gl polar HUD & tactical routing dashboard |
+| **Frontend Web Application** | **Vercel** | [frontend-pearl-nine-74.vercel.app](https://frontend-pearl-nine-74.vercel.app/) | Production React 19 + MapLibre/Deck.gl polar HUD & tactical routing dashboard |
 | **Backend REST API** | **Render** | [sih-2026-059.onrender.com](https://sih-2026-059.onrender.com) | FastAPI high-performance Antarctic routing engine & ML inference service |
 | **Interactive API Documentation** | **Swagger UI** | [sih-2026-059.onrender.com/docs](https://sih-2026-059.onrender.com/docs) | Interactive OpenAPI testing console for routes, iceberg forecasts & telemetry |
 | **Database Persistence** | **Supabase** | Cloud PostgreSQL / PostGIS | Relational persistence with fallback resilience for offline vessel operations |
-
-> *Note: If your Vercel deployment uses a custom URL, simply update the Frontend link above.*
 
 ---
 
