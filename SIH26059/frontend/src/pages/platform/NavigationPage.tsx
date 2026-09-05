@@ -193,7 +193,15 @@ export const NavigationPage: React.FC = () => {
     }
   }, [selectedVessel]);
 
-  const activeRoute = contextActiveRoute || routes.find(r => r.id === activeRouteId || r.id?.includes(activeRouteId)) || routes[0];
+  const activeRoute = useMemo(() => {
+    if (!routes || routes.length === 0) return contextActiveRoute || null;
+    return routes.find(r => r.id === activeRouteId) ||
+           routes.find(r => r.id?.includes(activeRouteId)) ||
+           contextActiveRoute ||
+           routes.find(r => r.recommended) ||
+           routes[0] ||
+           null;
+  }, [routes, activeRouteId, contextActiveRoute]);
 
   // Derive waypoints: prioritize backend RDP waypoints from the route, otherwise calculate along LineString
   const waypoints = useMemo<Waypoint[]>(() => {
@@ -214,15 +222,15 @@ export const NavigationPage: React.FC = () => {
         name: wp.name || `Waypoint ${idx + 1}`,
         latitude: wp.latitude ?? (wp as any).lat,
         longitude: wp.longitude ?? (wp as any).lon,
-        distanceFromStart: wp.distance_from_start_km ?? wp.distanceFromStart ?? Math.round(((idx + 1) / (validWps.length + 1)) * activeRoute.distance),
+        distanceFromStart: wp.distance_from_start_km ?? wp.distanceFromStart ?? Math.round(((idx + 1) / (validWps.length + 1)) * (activeRoute.distance || 3800)),
         eta: wp.eta ?? `T+${(idx + 1) * 6}h`,
         status: (idx === 0 ? 'active' : 'upcoming') as 'passed' | 'active' | 'upcoming',
-        iceRisk: wp.risk_score || wp.iceRisk || (activeRoute.id?.includes('route-a') ? 'HIGH' : activeRoute.id?.includes('route-b') ? 'MODERATE' : 'LOW'),
+        iceRisk: wp.risk_score || wp.iceRisk || activeRoute.iceRisk || 'MODERATE',
         reason: wp.reason || 'Course alteration along optimal corridor'
       }));
     }
     if (!activeRoute || !activeRoute.path) return [];
-    return generateWaypointsForRoute(activeRoute.path, activeRouteId, selectedDestination.name);
+    return generateWaypointsForRoute(activeRoute.path, activeRoute.id || activeRouteId, selectedDestination.name);
   }, [activeRoute, activeRouteId, selectedVessel, selectedDestination]);
 
   // Derive active vessel position along the active corridor
@@ -232,7 +240,7 @@ export const NavigationPage: React.FC = () => {
       : (selectedVessel?.heading || 180);
 
     return {
-      name: selectedVessel?.name || 'R/V Sagar Nidhi — DEMO',
+      name: selectedVessel?.name || 'Vessel Telemetry',
       latitude: selectedVessel?.latitude,
       longitude: selectedVessel?.longitude,
       speed: cruisingSpeed,
@@ -332,8 +340,8 @@ export const NavigationPage: React.FC = () => {
                 className={cn(
                   "px-2 py-0.5 rounded-xs text-[10px] font-mono font-bold transition-all cursor-pointer",
                   selectedHorizon === h
-                    ? "bg-cyan-500/25 text-cyan-300 border border-cyan-400/80 shadow-[0_0_8px_rgba(34,211,238,0.3)]"
-                    : "text-slate-400 hover:text-white border border-transparent"
+                    ? "bg-glacial-blue text-navy font-bold shadow-xs"
+                    : "text-slate-400 hover:text-white"
                 )}
               >
                 {label}
@@ -344,10 +352,10 @@ export const NavigationPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsCopilotOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-sm bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-400/60 text-xs font-mono text-cyan-300 font-semibold shadow-[0_0_12px_rgba(34,211,238,0.25)] transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-sm bg-polar-navy/60 hover:bg-polar-navy border border-slate/30 text-xs font-mono text-slate-200 hover:text-white font-semibold transition-all cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-            <span>Gemini AI Copilot</span>
+            <Sparkles className="w-3.5 h-3.5 text-glacial-blue" />
+            <span>Navigation Copilot</span>
           </button>
           <button
             type="button"
@@ -399,7 +407,7 @@ export const NavigationPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setIsMissionModalOpen(true)}
-                      className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-sm text-xs font-bold font-mono flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
+                      className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-sm text-xs font-bold font-mono flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                     >
                       <Navigation className="w-3.5 h-3.5" />
                       <span>New Mission</span>
@@ -414,13 +422,13 @@ export const NavigationPage: React.FC = () => {
                   </div>
                 </div>
               ) : selectedVessel.mission_status === 'AVAILABLE' ? (
-                <div className="bg-cyan-950/30 border border-cyan-500/30 p-3 rounded-sm font-mono text-xs space-y-2">
+                <div className="bg-polar-navy/30 border border-slate/30 p-3 rounded-sm font-mono text-xs space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-cyan-400 font-bold flex items-center gap-1.5 text-[11px]">
-                      <Ship className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="text-glacial-blue font-bold flex items-center gap-1.5 text-[11px]">
+                      <Ship className="w-3.5 h-3.5 text-glacial-blue" />
                       VESSEL AVAILABLE
                     </span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-glacial-blue/10 text-ice-blue border border-glacial-blue/30">
                       READY
                     </span>
                   </div>
@@ -428,7 +436,7 @@ export const NavigationPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsMissionModalOpen(true)}
-                    className="w-full py-1.5 px-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-sm text-xs font-bold font-mono flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
+                    className="w-full py-1.5 px-2 bg-glacial-blue hover:bg-ice-blue text-navy rounded-sm text-xs font-bold font-mono flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                   >
                     <Navigation className="w-3.5 h-3.5" />
                     <span>Assign Mission</span>
@@ -438,7 +446,7 @@ export const NavigationPage: React.FC = () => {
                 <div className="bg-polar-navy/30 border border-slate/20 p-2.5 rounded-sm font-mono text-xs space-y-1.5">
                   <div className="flex items-center justify-between text-[10px]">
                     <span className="text-glacial-blue font-bold flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-glacial-blue animate-pulse" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-glacial-blue" />
                       UNDERWAY &bull; {selectedVessel.destination.split(' ')[0]}
                     </span>
                     <span className="text-slate-400 font-mono">
@@ -609,7 +617,7 @@ export const NavigationPage: React.FC = () => {
                   className={cn(
                     "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
                     emergencyRerouteActive
-                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral animate-pulse shadow-[0_0_15px_rgba(255,107,94,0.3)]"
+                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral font-bold"
                       : "bg-polar-navy/40 border-slate/30 text-slate-300 hover:text-white hover:border-glacial-blue"
                   )}
                 >
@@ -671,8 +679,12 @@ export const NavigationPage: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-1.5 p-1 bg-polar-navy/30 rounded-sm border border-slate/20">
                 {routes.map((route) => {
-                  const isSelected = activeRouteId === route.id || route.id?.includes(activeRouteId) || (activeRouteId === 'route-b' && route.recommended);
-                  const label = route.id?.includes('route-a') ? 'Fastest' : route.id?.includes('route-c') ? 'Safest' : 'Optimal';
+                  const isSelected = activeRoute?.id === route.id;
+                  const label = route.optimization_mode === 'FASTEST' ? 'Fastest' :
+                                route.optimization_mode === 'SAFEST' ? 'Safest' :
+                                route.optimization_mode === 'BALANCED' ? 'Optimal' :
+                                route.id?.includes('route-a') ? 'Fastest' :
+                                route.id?.includes('route-c') ? 'Safest' : 'Optimal';
 
                   return (
                     <button
@@ -704,23 +716,35 @@ export const NavigationPage: React.FC = () => {
                       <span className="text-ice-white font-semibold">{activeRoute.name}</span>
                       <span className="text-slate-400 block text-[10px] mt-0.5">ETA: {activeRoute.eta} • {activeRoute.distance} km</span>
                     </div>
-                    <span className={cn('px-2 py-0.5 rounded-sm border text-[9px] font-bold', riskBadge(activeRoute.iceRisk || ''))}>
-                      RIO: {String(activeRoute.rioScore || '').startsWith('+') || String(activeRoute.rioScore || '').startsWith('-') ? activeRoute.rioScore : `+${activeRoute.rioScore || '8.4'}`}
-                    </span>
+                    {(() => {
+                      const rioVal = typeof activeRoute.rioScore === 'number' ? activeRoute.rioScore : parseFloat(String(activeRoute.rioScore || '0')) || 0;
+                      const formattedRio = rioVal > 0 ? `+${rioVal.toFixed(1)}` : rioVal.toFixed(1);
+                      return (
+                        <span className={cn('px-2 py-0.5 rounded-sm border text-[9px] font-bold', riskBadge(activeRoute.iceRisk || ''))}>
+                          RIO: {formattedRio}
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate/20 text-[10px]">
                     <div>
                       <span className="text-slate-400 block text-[9px]">FUEL</span>
-                      <span className="text-ice-white font-semibold">{activeRoute.fuelConsumption || '104 MT'}</span>
+                      <span className="text-ice-white font-semibold">{activeRoute.fuelConsumption}</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 block text-[9px]">PACK ICE</span>
-                      <span className="text-glacial-blue font-semibold">{activeRoute.sicExposure || 22}%</span>
+                      <span className="text-slate-400 block text-[9px]">ACTUAL SIC</span>
+                      <span className="text-glacial-blue font-semibold">{activeRoute.sic_actual !== undefined ? `${activeRoute.sic_actual}%` : `${activeRoute.sicExposure ?? 0}%`}</span>
                     </div>
                     <div>
                       <span className="text-slate-400 block text-[9px]">ICEBERGS</span>
-                      <span className="text-ice-white font-semibold">{activeRoute.icebergEncounters || 1} zone</span>
+                      <span className="text-ice-white font-semibold">
+                        {activeRoute.minimum_cpa_km !== undefined
+                          ? `${activeRoute.minimum_cpa_km} km CPA`
+                          : activeRoute.has_iceberg_hazard || activeRoute.icebergEncounters
+                          ? '1 zone'
+                          : '0 zones'}
+                      </span>
                     </div>
                   </div>
 
@@ -761,9 +785,9 @@ export const NavigationPage: React.FC = () => {
 
             {/* Selected Iceberg Hazard Banner (Cross-Page Context) */}
             {selectedIcebergId && (
-              <div className="bg-risk-high/15 border border-risk-high/40 p-2.5 rounded-sm flex items-center justify-between text-xs font-mono animate-in fade-in">
+              <div className="bg-risk-high/15 border border-risk-high/40 p-2.5 rounded-sm flex items-center justify-between text-xs font-mono">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-risk-high animate-ping" />
+                  <span className="w-2 h-2 rounded-full bg-risk-high" />
                   <div>
                     <span className="text-[10px] text-risk-high font-bold block uppercase tracking-wider">TRACKED RADAR HAZARD</span>
                     <span className="text-ice-white font-semibold">Target {selectedIcebergId} Context Active</span>
@@ -808,7 +832,7 @@ export const NavigationPage: React.FC = () => {
             type="button"
             onClick={handleSolveRoute}
             disabled={isOptimizing}
-            className="w-full py-2 rounded-sm font-mono font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-signature-coral to-deep-coral hover:from-soft-coral hover:to-signature-coral text-white flex items-center justify-center gap-2 shadow-sm transition-all mt-2"
+            className="w-full py-2 rounded-sm font-mono font-bold text-xs uppercase tracking-wider bg-signature-coral hover:bg-soft-coral text-white flex items-center justify-center gap-2 transition-all mt-2"
           >
             {isOptimizing ? (
               <>
@@ -830,7 +854,7 @@ export const NavigationPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-md bg-[#030d1a]/90 hover:bg-[#081e36] border border-slate/30 text-ice-white hover:text-glacial-blue text-xs font-mono flex items-center gap-1.5 shadow-lg backdrop-blur-md cursor-pointer transition-all"
+            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-sm bg-navy/90 hover:bg-polar-navy border border-slate/30 text-ice-white hover:text-glacial-blue text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all"
             title={isSidebarOpen ? "Hide sidebar (full map view)" : "Show route controls"}
           >
             {isSidebarOpen ? (
@@ -853,7 +877,7 @@ export const NavigationPage: React.FC = () => {
             section="navigation"
             activeHorizon={activeHorizonLabel}
             destinationMarker={destMarker}
-            activeRouteId={activeRouteId}
+            activeRouteId={activeRoute?.id || activeRouteId}
             onSelectRoute={(rId) => handleSelectRoute(rId)}
             customRoutePath={activeRoute?.path}
             allRoutes={routes}
@@ -871,11 +895,11 @@ export const NavigationPage: React.FC = () => {
 
       {/* Compact Mission Assignment Modal (Step 13) */}
       {isMissionModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-[#0b1726] border border-cyan-500/40 rounded-sm shadow-2xl max-w-sm w-full p-4 space-y-3 font-mono text-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="bg-navy border border-slate/30 rounded-sm shadow-xl max-w-sm w-full p-4 space-y-3 font-mono text-xs">
             <div className="flex items-center justify-between pb-2 border-b border-slate/20">
               <div className="flex items-center gap-2">
-                <Ship className="w-4 h-4 text-cyan-400" />
+                <Ship className="w-4 h-4 text-glacial-blue" />
                 <span className="font-bold text-ice-white text-sm">Assign Mission</span>
               </div>
               <button
@@ -892,7 +916,7 @@ export const NavigationPage: React.FC = () => {
               <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Vessel</span>
               <div className="p-2 bg-polar-navy/60 border border-slate/30 rounded-xs text-ice-white flex items-center justify-between">
                 <span className="font-bold">{selectedVessel.name}</span>
-                <span className="text-[10px] text-cyan-400">{selectedVessel.mission_status || 'AVAILABLE'}</span>
+                <span className="text-[10px] text-glacial-blue">{selectedVessel.mission_status || 'AVAILABLE'}</span>
               </div>
               <span className="text-[9px] text-slate-400 mt-1 block">
                 Current Berth / Origin: <strong className="text-slate-200">{selectedVessel.destination || selectedVessel.voyage_origin || 'Station Berth'}</strong>
@@ -905,7 +929,7 @@ export const NavigationPage: React.FC = () => {
               <select
                 value={modalDestinationId}
                 onChange={(e) => setModalDestinationId(e.target.value)}
-                className="w-full bg-polar-navy/90 border border-slate/40 rounded-xs p-2 text-ice-white font-mono focus:border-cyan-400 focus:outline-none"
+                className="w-full bg-polar-navy/90 border border-slate/40 rounded-xs p-2 text-ice-white font-mono focus:border-glacial-blue focus:outline-none"
               >
                 {stations.map(st => (
                   <option key={st.id} value={st.id} className="bg-polar-navy text-ice-white">
@@ -922,7 +946,7 @@ export const NavigationPage: React.FC = () => {
                 <select
                   value={modalMissionType}
                   onChange={(e) => setModalMissionType(e.target.value as MissionType)}
-                  className="w-full bg-polar-navy/90 border border-slate/40 rounded-xs p-1.5 text-xs text-ice-white font-mono focus:border-cyan-400 focus:outline-none"
+                  className="w-full bg-polar-navy/90 border border-slate/40 rounded-xs p-1.5 text-xs text-ice-white font-mono focus:border-glacial-blue focus:outline-none"
                 >
                   <option value="RESEARCH">Research</option>
                   <option value="RESUPPLY">Resupply</option>
@@ -936,7 +960,7 @@ export const NavigationPage: React.FC = () => {
                 <select
                   value={modalRouteProfile}
                   onChange={(e) => setModalRouteProfile(e.target.value as OptimizationPriority)}
-                  className="w-full bg-polar-navy/90 border border-slate/40 rounded-xs p-1.5 text-xs text-ice-white font-mono focus:border-cyan-400 focus:outline-none"
+                  className="w-full bg-polar-navy/90 border border-slate/40 rounded-xs p-1.5 text-xs text-ice-white font-mono focus:border-glacial-blue focus:outline-none"
                 >
                   <option value="BALANCED">Balanced</option>
                   <option value="SAFEST">Safest (Min Ice)</option>
@@ -959,7 +983,7 @@ export const NavigationPage: React.FC = () => {
                 type="button"
                 disabled={isAssigningMission || !modalDestinationId}
                 onClick={handleAssignMissionSubmit}
-                className="flex-1 py-1.5 px-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xs font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 shadow-md"
+                className="flex-1 py-1.5 px-3 bg-glacial-blue hover:bg-ice-blue text-navy rounded-xs font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
               >
                 {isAssigningMission ? (
                   <>

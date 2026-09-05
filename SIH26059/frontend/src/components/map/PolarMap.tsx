@@ -516,7 +516,7 @@ export const PolarMap: React.FC<PolarMapProps> = ({
 
   // Fetch routes for current active vessel & destination
   useEffect(() => {
-    if (allRoutes && allRoutes.length > 0) {
+    if (allRoutes !== undefined) {
       setVesselRoutes(allRoutes);
       return;
     }
@@ -576,13 +576,12 @@ export const PolarMap: React.FC<PolarMapProps> = ({
     return generateSmoothRealDataIceBands(sicGridData?.points || null, timeStep);
   }, [sicGridData, timeStep]);
 
-  // Active Route Object
+  // Active Route Object derived strictly from activeRouteId or vesselRoutes
   const activeRouteKey = activeRouteId.includes('route-c') ? 'route-c' : activeRouteId.includes('route-a') ? 'route-a' : 'route-b';
   const activeRouteObj = vesselRoutes.find(r => 
     r.id === activeRouteId || 
-    r.id === `${currentVesselId}-${activeRouteId}` ||
-    r.id.endsWith(activeRouteKey)
-  ) || vesselRoutes[0];
+    r.id === `${currentVesselId}-${activeRouteId}`
+  ) || vesselRoutes.find(r => r.id.endsWith(activeRouteKey)) || vesselRoutes.find(r => r.recommended) || vesselRoutes[0];
 
   // Handle vessel selection (triggers global context and optional callback)
   const handleVesselChange = (vesselId: string) => {
@@ -968,7 +967,7 @@ export const PolarMap: React.FC<PolarMapProps> = ({
     if (vesselRoutes && vesselRoutes.length > 0) {
       vesselRoutes.forEach((r) => {
         if (!r.path || r.path.length < 2) return;
-        const isSelected = r.id === activeRouteObj?.id || (r.id.endsWith(activeRouteKey));
+        const isSelected = r.id === activeRouteObj?.id;
         const isRecommended = Boolean(r.recommended);
         
         // Active recommended route is prominent solid #10B981 emerald or #00F2FE cyan.

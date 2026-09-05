@@ -109,7 +109,7 @@ export const AlertsPage: React.FC = () => {
             <span className="text-ice-white font-semibold">{selectedVessel.name.split(' ')[0]}</span>
           </div>
           <span className="text-slate-400">STATUS:</span>
-          <span className={cn("font-semibold", activeCriticalCount > 0 ? "text-signature-coral animate-pulse" : "text-risk-safe")}>
+          <span className={cn("font-semibold", activeCriticalCount > 0 ? "text-signature-coral" : "text-risk-safe")}>
             {activeCriticalCount > 0 ? `${activeCriticalCount} ACTIVE THREATS` : "ALL HAZARDS MITIGATED"}
           </span>
         </div>
@@ -123,7 +123,7 @@ export const AlertsPage: React.FC = () => {
             <div className="text-[10px] font-mono text-glacial-blue tracking-widest uppercase font-semibold">
               01 // Safety Protocols
             </div>
-            <h3 className="text-2xl font-bold text-ice-white font-sans mt-0.5">Active Navigation Hazards</h3>
+            <h3 className="text-base sm:text-lg font-bold text-ice-white font-sans mt-0.5">Active Navigation Hazards</h3>
           </div>
 
           <div className="flex items-center gap-1 font-mono text-xs bg-polar-navy/30 p-1 rounded-sm border border-slate/20">
@@ -212,7 +212,7 @@ export const AlertsPage: React.FC = () => {
                     </button>
                     <Link
                       to="/navigation"
-                      className="flex items-center gap-1.5 bg-gradient-to-r from-signature-coral to-deep-coral hover:from-soft-coral hover:to-signature-coral text-white font-bold px-3 py-1 rounded-sm text-xs font-mono transition-all shadow-sm"
+                      className="flex items-center gap-1.5 bg-signature-coral hover:bg-soft-coral text-white font-bold px-3 py-1 rounded-sm text-xs font-mono transition-colors"
                     >
                       <RouteIcon className="w-3.5 h-3.5" />
                       <span>Mitigate Route</span>

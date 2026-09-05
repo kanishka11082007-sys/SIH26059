@@ -131,7 +131,7 @@ export const AnalysisPage: React.FC = () => {
             <div className="text-[10px] font-mono text-glacial-blue tracking-widest uppercase font-semibold">
               01 // Hydrodynamic Risk Modeling
             </div>
-            <h2 className="text-2xl sm:text-3xl font-bold text-ice-white font-sans">
+            <h2 className="text-base sm:text-lg font-bold text-ice-white font-sans">
               Southern Ocean Dynamic Risk Surface
             </h2>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-sans">

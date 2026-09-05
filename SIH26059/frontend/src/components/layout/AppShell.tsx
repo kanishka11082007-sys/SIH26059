@@ -210,11 +210,11 @@ export const AppShell: React.FC<AppShellProps> = ({
 
       {/* PROVENANCE MODAL */}
       {provenanceModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-navy border border-glacial-blue/40 rounded-md max-w-2xl w-full p-6 space-y-4 shadow-2xl font-mono">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="bg-navy border border-slate/30 rounded-sm max-w-2xl w-full p-6 space-y-4 shadow-lg font-mono">
             <div className="flex items-center justify-between border-b border-slate/20 pb-3">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
                 <h3 className="text-sm font-bold text-ice-white uppercase tracking-wider">
                   Authoritative Data Pipeline & Provenance Audit
                 </h3>
@@ -284,9 +284,9 @@ export const AppShell: React.FC<AppShellProps> = ({
               </div>
             </div>
 
-            <div className="p-2.5 bg-polar-navy/50 border border-glacial-blue/30 rounded text-[11px] text-slate-300 flex items-center justify-between">
+            <div className="p-2.5 bg-polar-navy/50 border border-slate/30 rounded-sm text-[11px] text-slate-300 flex items-center justify-between">
               <span>Verified SIH PS 59 Data Pipeline</span>
-              <span className="text-emerald-400 font-bold">100% AUDIT COMPLIANT</span>
+              <span className="text-emerald-400 font-bold">VERIFIED AUDIT COMPLIANT</span>
             </div>
           </div>
         </div>

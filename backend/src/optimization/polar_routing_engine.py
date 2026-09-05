@@ -509,6 +509,8 @@ class PolarRoutingEngine:
         w_sic = profile.get("w_sic", 2.0)
         w_ib = profile.get("w_iceberg", 3.0)
         clearance_km = profile.get("clearance_km", 15.0)
+        max_sic_allowed = profile.get("max_sic_allowed", 90.0)
+        lateral_bias = profile.get("lateral_bias", 0.0)
 
         # Direct SIC references for maximum query performance
         has_real_sic = (
@@ -567,10 +569,22 @@ class PolarRoutingEngine:
                 local_cost_cache[cell_idx] = float('inf')
                 return float('inf')
 
-            sic_penalty = 1.0 + ((raw_sic / 100.0) ** 2) * w_sic * 2.5
+            dist_to_dest_m = math.hypot(x - nav_dx, y - nav_dy)
+
+            # Route C (SAFEST ICE MARGIN): Enforce marginal ice zone standoff
+            # Maximizes open water passage and minimizes total transit distance inside the sea ice pack
+            if mode == "SAFEST":
+                if raw_sic > 10.0:
+                    standoff_factor = ((dist_to_dest_m / 800_000.0) ** 2) * 12.0
+                    excess = max(0.0, (raw_sic - max_sic_allowed) / 10.0)
+                    sic_penalty = 1.0 + ((raw_sic / 100.0) ** 2) * w_sic * 8.0 + standoff_factor + (excess ** 2) * 30.0
+                else:
+                    sic_penalty = 1.0
+            else:
+                sic_penalty = 1.0 + ((raw_sic / 100.0) ** 2) * w_sic * 2.5
 
             if min_cpa < clearance_km * 0.4:
-                ib_penalty = 15.0
+                ib_penalty = 25.0 if mode == "SAFEST" else 15.0
             elif min_cpa < clearance_km:
                 ib_risk = math.exp(-0.5 * (min_cpa / (clearance_km * 0.4)) ** 2) * 25.0
                 ib_penalty = 1.0 + (ib_risk * 0.1 * w_ib)
@@ -881,16 +895,12 @@ class PolarRoutingEngine:
                 x_bear = math.cos(p_phi1) * math.sin(p_phi2) - math.sin(p_phi1) * math.cos(p_phi2) * math.cos(p_dlam)
                 seg_bearing = (math.degrees(math.atan2(y_bear, x_bear)) + 360.0) % 360.0
 
-                # 1. Evaluate real satellite Sea Ice Concentration (from batch evaluation)
+                # 1. Evaluate real satellite Sea Ice Concentration (canonical physical value 0-100%)
                 raw_sic = sic_values_all[i]
-                if mode == "SAFEST":
-                    sic = max(0.0, raw_sic * 0.25)
-                elif mode == "BALANCED":
-                    sic = max(0.0, raw_sic * 0.65)
-                else:
-                    sic = max(0.0, raw_sic * 1.05)
+                sic = raw_sic
                 sic_samples.append(sic)
-                total_ice_penalty += (sic / 100.0) * seg_dist * 0.15
+                w_prof_sic = profile.get("w_sic", 1.0)
+                total_ice_penalty += ((sic / 100.0) ** 2) * seg_dist * 0.15 * w_prof_sic
 
                 # Speed reduction and ice classification
                 if sic >= 80.0:
@@ -1284,8 +1294,12 @@ class PolarRoutingEngine:
                     "fast_ice_km": metrics["fast_ice_km"],
                     "pack_ice_km": metrics["pack_ice_km"],
                     "open_water_km": metrics["open_water_km"],
-                    "avg_sic": round(metrics["avg_sic"], 1)
+                    "avg_sic": round(metrics["avg_sic"], 1),
+                    "sic_actual": round(metrics["avg_sic"], 1),
+                    "sic_cost_contribution": round(metrics.get("costs", {}).get("ice_cost", 0.0), 2),
                 },
+                "sic_actual": round(metrics["avg_sic"], 1),
+                "sic_cost_contribution": round(metrics.get("costs", {}).get("ice_cost", 0.0), 2),
                 "sicExposure": int(metrics["avg_sic"]),
                 "reason": explain,
                 "path": path_coords,

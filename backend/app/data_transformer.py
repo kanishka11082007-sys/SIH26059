@@ -701,9 +701,10 @@ def get_routes(vessel_id=None, dest_id=None, dest_lat=None, dest_lon=None, dest_
 
     dest_override = (dest_lat, dest_lon) if (dest_lat is not None and dest_lon is not None) else None
 
-    # 3. Canonical Cache Key: (vessel_id, dest_identifier, emergency_status)
+    # 3. Canonical Cache Key: (vessel_id, origin_coords, dest_identifier, emergency_status)
+    orig_key = (round(float(v.get("latitude", 0.0)), 2), round(float(v.get("longitude", 0.0)), 2))
     dest_key = norm_dest_id if norm_dest_id else (f"{round(float(dest_lat), 2)}_{round(float(dest_lon), 2)}" if dest_override else "default")
-    cache_key = (str(v["id"]).lower(), dest_key, bool(emergency))
+    cache_key = (str(v["id"]).lower(), orig_key, dest_key, bool(emergency))
 
     now = time.time()
     if cache_key in _ROUTES_CACHE:

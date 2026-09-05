@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   CheckCircle2, Ship, MapPin, Sparkles, ShieldAlert, Zap,
   PanelLeftClose, PanelLeftOpen, Navigation, Loader2
@@ -15,6 +15,7 @@ import { cn } from '../../utils/cn';
 interface RouteOption {
   id: string;
   name: string;
+  optimization_mode?: string;
   distance: number;
   eta: string;
   path?: [number, number][];
@@ -25,6 +26,8 @@ interface RouteOption {
   overallScore?: number;
   fuelConsumption?: string | number;
   sicExposure?: number;
+  sic_actual?: number;
+  sic_cost_contribution?: number;
   rioScore?: number | string;
   reason?: string;
   costs?: Record<string, number>;
@@ -47,6 +50,7 @@ export const RouteOptimizationPage: React.FC = () => {
     routes,
     activeRouteId,
     setActiveRouteId,
+    activeRoute,
     emergencyRerouteActive,
     triggerEmergencyHazard,
     whatIfScenario,
@@ -55,7 +59,6 @@ export const RouteOptimizationPage: React.FC = () => {
     isComputingRoutes
   } = useFleet();
 
-  const [selectedRouteId, setSelectedRouteId] = useState<string>('route-b');
   const [bharatiValidation, setBharatiValidation] = useState<any>(null);
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
@@ -83,21 +86,29 @@ export const RouteOptimizationPage: React.FC = () => {
 
   const handleSetActiveRoute = (routeId: string) => {
     setActiveRouteId(routeId);
-    setSelectedRouteId(routeId);
   };
 
   const getRiskDetails = (route: RouteOption) => {
     const rIce = (route.iceRisk || '').toUpperCase();
-    if (route.id?.includes('route-a') || rIce === 'HIGH') {
+    if (route.optimization_mode === 'FASTEST' || route.id?.includes('route-a') || rIce === 'HIGH') {
       return { label: 'HIGH RISK', color: 'text-signature-coral', bg: 'bg-signature-coral/10', border: 'border-signature-coral/40', bar: 'bg-signature-coral w-4/5' };
     }
-    if (route.id?.includes('route-b') || rIce === 'MODERATE') {
+    if (route.optimization_mode === 'BALANCED' || route.id?.includes('route-b') || rIce === 'MODERATE') {
       return { label: 'MODERATE RISK', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/40', bar: 'bg-amber-400 w-1/2' };
     }
     return { label: 'LOW RISK', color: 'text-risk-safe', bg: 'bg-risk-safe/10', border: 'border-risk-safe/40', bar: 'bg-risk-safe w-1/4' };
   };
 
-  const selectedRoute = routes.find(r => r.id === selectedRouteId) || routes[0];
+  const selectedRoute = useMemo(() => {
+    if (!routes || routes.length === 0) return activeRoute || null;
+    return routes.find(r => r.id === activeRouteId) ||
+           routes.find(r => r.id?.includes(activeRouteId)) ||
+           activeRoute ||
+           routes.find(r => r.recommended) ||
+           routes[0] ||
+           null;
+  }, [routes, activeRouteId, activeRoute]);
+
   const selectedRisk = selectedRoute ? getRiskDetails(selectedRoute) : { label: 'MODERATE RISK', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/40' };
 
   return (
@@ -113,10 +124,10 @@ export const RouteOptimizationPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsCopilotOpen(true)}
-            className="flex items-center gap-1.5 text-xs font-mono bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-400/60 px-3 py-1 rounded-sm text-cyan-300 font-semibold shadow-[0_0_12px_rgba(34,211,238,0.25)] transition-all cursor-pointer"
+            className="flex items-center gap-1.5 text-xs font-mono bg-polar-navy/60 hover:bg-polar-navy border border-slate/30 px-3 py-1 rounded-sm text-slate-200 hover:text-white font-semibold transition-all cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-            <span>Gemini AI Copilot</span>
+            <Sparkles className="w-3.5 h-3.5 text-glacial-blue" />
+            <span>Route Copilot</span>
           </button>
         </div>
       }
@@ -287,7 +298,7 @@ export const RouteOptimizationPage: React.FC = () => {
                   className={cn(
                     "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
                     emergencyRerouteActive
-                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral animate-pulse shadow-[0_0_15px_rgba(255,107,94,0.3)]"
+                      ? "bg-signature-coral/20 border-signature-coral text-signature-coral font-bold"
                       : "bg-polar-navy/40 border-slate/30 text-slate-300 hover:text-white hover:border-glacial-blue"
                   )}
                 >
@@ -342,15 +353,19 @@ export const RouteOptimizationPage: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-1.5 p-1 bg-polar-navy/30 rounded-sm border border-slate/20">
                 {routes.map((r) => {
-                  const isSel = selectedRouteId === r.id;
-                  const isAct = activeRouteId === r.id;
-                  const label = r.id?.includes('route-a') ? 'Fastest' : r.id?.includes('route-c') ? 'Safest' : 'Optimal';
+                  const isSel = selectedRoute?.id === r.id;
+                  const isAct = activeRoute?.id === r.id;
+                  const label = r.optimization_mode === 'FASTEST' ? 'Fastest' :
+                                r.optimization_mode === 'SAFEST' ? 'Safest' :
+                                r.optimization_mode === 'BALANCED' ? 'Optimal' :
+                                r.id?.includes('route-a') ? 'Fastest' :
+                                r.id?.includes('route-c') ? 'Safest' : 'Optimal';
 
                   return (
                     <button
                       key={r.id}
                       type="button"
-                      onClick={() => setSelectedRouteId(r.id)}
+                      onClick={() => handleSetActiveRoute(r.id)}
                       className={cn(
                         "py-2 px-1 text-center rounded-sm text-xs font-mono transition-all flex flex-col items-center justify-center relative",
                         isSel
@@ -393,8 +408,8 @@ export const RouteOptimizationPage: React.FC = () => {
                       <span className="text-ice-white font-semibold">{selectedRoute.fuelConsumption}</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 block text-[9px]">SIC EXPOSURE</span>
-                      <span className="text-glacial-blue font-semibold">{selectedRoute.sicExposure}%</span>
+                      <span className="text-slate-400 block text-[9px]">ACTUAL SIC</span>
+                      <span className="text-glacial-blue font-semibold">{selectedRoute.sic_actual !== undefined ? `${selectedRoute.sic_actual}%` : `${selectedRoute.sicExposure}%`}</span>
                     </div>
                     <div>
                       <span className="text-slate-400 block text-[9px]">POLARIS RIO</span>
@@ -457,7 +472,7 @@ export const RouteOptimizationPage: React.FC = () => {
                       "w-full py-2 rounded-sm text-xs font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 mt-2",
                       activeRouteId === selectedRoute.id
                         ? "bg-risk-safe text-navy"
-                        : "bg-gradient-to-r from-signature-coral to-deep-coral hover:from-soft-coral hover:to-signature-coral text-white shadow-sm"
+                        : "bg-signature-coral hover:bg-soft-coral text-white"
                     )}
                   >
                     {activeRouteId === selectedRoute.id ? (
@@ -473,10 +488,10 @@ export const RouteOptimizationPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsCopilotOpen(true)}
-                    className="w-full py-2 rounded-sm text-xs font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 mt-2 bg-gradient-to-r from-cyan-950 to-blue-950 hover:from-cyan-900 hover:to-blue-900 border border-cyan-500/50 text-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.15)] cursor-pointer"
+                    className="w-full py-2 rounded-sm text-xs font-mono font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 mt-2 bg-polar-navy/60 hover:bg-polar-navy border border-slate/30 text-slate-200 hover:text-white cursor-pointer"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Ask Gemini Copilot About Route</span>
+                    <Sparkles className="w-3.5 h-3.5 text-glacial-blue" />
+                    <span>Inquire Copilot About Route</span>
                   </button>
                 </div>
               )}
@@ -496,7 +511,7 @@ export const RouteOptimizationPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-md bg-[#030d1a]/90 hover:bg-[#081e36] border border-slate/30 text-ice-white hover:text-glacial-blue text-xs font-mono flex items-center gap-1.5 shadow-lg backdrop-blur-md cursor-pointer transition-all"
+            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-sm bg-navy/90 hover:bg-polar-navy border border-slate/30 text-ice-white hover:text-glacial-blue text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all"
             title={isSidebarOpen ? "Hide sidebar (full map view)" : "Show route controls"}
           >
             {isSidebarOpen ? (
@@ -523,7 +538,8 @@ export const RouteOptimizationPage: React.FC = () => {
             showIcebergs={true}
             selectedVesselId={selectedVesselId}
             onSelectVessel={(id) => setSelectedVesselId(id)}
-            activeRouteId={activeRouteId}
+            activeRouteId={selectedRoute?.id || activeRouteId}
+            customRoutePath={selectedRoute?.path}
             onSelectRoute={(id) => handleSetActiveRoute(id)}
             destinationMarker={{
               latitude: activeDestination.latitude ?? (activeDestination as any).lat ?? -62.0833,

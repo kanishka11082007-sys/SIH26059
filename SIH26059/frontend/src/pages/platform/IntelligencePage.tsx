@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   AlertTriangle, 
@@ -18,12 +18,10 @@ import { api } from '../../services/api';
 import { cn } from '../../utils/cn';
 
 export const IntelligencePage: React.FC = () => {
-  const { selectedVessel, setSelectedVesselId, fleet, activeRoute, routes: contextRoutes } = useFleet();
+  const { selectedVessel, setSelectedVesselId, fleet, activeRoute, activeRouteId, setActiveRouteId, routes } = useFleet();
   const [alerts, setAlerts] = useState<any[]>([]);
   const [envStatus, setEnvStatus] = useState<any>(null);
   const [aiModels, setAiModels] = useState<any>(null);
-  const [liveRoutes, setLiveRoutes] = useState<any[]>([]);
-  const [selectedRouteId, setSelectedRouteId] = useState<string>('route-b');
   const [dbInfo, setDbInfo] = useState<any>(null);
 
   // Load environment status, alerts, authentic AI model benchmarks, and DB status on mount
@@ -47,27 +45,15 @@ export const IntelligencePage: React.FC = () => {
     loadData();
   }, []);
 
-  // Fetch real routes for selected vessel only if not already in context
-  useEffect(() => {
-    if (contextRoutes && contextRoutes.length > 0) return;
-    if (!selectedVessel?.id) return;
-    api.routes({
-      vesselId: selectedVessel.id,
-      destLat: selectedVessel.dest_lat,
-      destLon: selectedVessel.dest_lon,
-      destName: selectedVessel.destination
-    }).then((res) => {
-      if (res?.routes?.length) {
-        setLiveRoutes(res.routes);
-      }
-    }).catch(() => {});
-  }, [selectedVessel?.id, selectedVessel?.dest_lat, selectedVessel?.dest_lon, selectedVessel?.destination, contextRoutes]);
-
-  const availableRoutes = liveRoutes.length > 0 ? liveRoutes : (contextRoutes.length > 0 ? contextRoutes : []);
-  const currentRoute = availableRoutes.find(r => r.id === selectedRouteId || r.id?.includes(selectedRouteId)) ||
-                       availableRoutes.find(r => r.recommended) ||
-                       availableRoutes[0] ||
-                       activeRoute;
+  const currentRoute = useMemo(() => {
+    if (!routes || routes.length === 0) return activeRoute || null;
+    return routes.find(r => r.id === activeRouteId) ||
+           routes.find(r => r.id?.includes(activeRouteId)) ||
+           activeRoute ||
+           routes.find(r => r.recommended) ||
+           routes[0] ||
+           null;
+  }, [routes, activeRouteId, activeRoute]);
 
   const costBreakdown = currentRoute?.cost_breakdown || currentRoute?.costs || {
     distance_cost: 168.0,
@@ -80,7 +66,9 @@ export const IntelligencePage: React.FC = () => {
     total_cost: 1518.4
   };
 
-  const explanation = currentRoute?.decision_explanation || currentRoute?.reason || 
+  const explanation = currentRoute?.decision_support?.recommendation || 
+    currentRoute?.decision_explanation || 
+    currentRoute?.reason || 
     `${currentRoute?.name || 'ROUTE B - OPTIMAL'} is recommended for ${selectedVessel.name} to ${selectedVessel.destination}. It achieves the lowest multi-objective composite cost by navigating open leads, avoiding iceberg drift zones, and optimizing fuel efficiency.`;
 
   return (
@@ -95,10 +83,7 @@ export const IntelligencePage: React.FC = () => {
             <span className="text-slate-400 text-[11px] font-bold">VESSEL:</span>
             <select
               value={selectedVessel.id}
-              onChange={(e) => {
-                setSelectedVesselId(e.target.value);
-                setSelectedRouteId('route-b');
-              }}
+              onChange={(e) => setSelectedVesselId(e.target.value)}
               className="bg-transparent text-ice-white font-semibold text-xs border-none focus:outline-none cursor-pointer pr-1"
             >
               {fleet.map((v) => (
@@ -109,8 +94,8 @@ export const IntelligencePage: React.FC = () => {
             </select>
           </div>
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-polar-navy/40 border border-emerald-500/30 rounded-sm text-emerald-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">AI ENGINE VERIFIED</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">DECISION ENGINE VERIFIED</span>
           </div>
         </div>
       }
@@ -118,65 +103,71 @@ export const IntelligencePage: React.FC = () => {
       <div className="h-full overflow-y-auto custom-scrollbar p-6 lg:p-8 space-y-6 bg-navy text-ice-white font-sans selection:bg-glacial-blue selection:text-white">
 
         {/* Active Route Decision & Multi-Objective Cost Surface */}
-        <div className="p-6 rounded-md bg-polar-navy/40 border border-glacial-blue/30 backdrop-blur-md shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-glacial-blue/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-          
+        <div className="p-5 sm:p-6 rounded-sm bg-polar-navy/30 border border-slate/20">
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate/20 pb-4 mb-4 font-mono">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded bg-polar-navy/80 border border-glacial-blue/40 flex items-center justify-center text-glacial-blue shadow-md">
-                <Cpu className="w-5 h-5 text-glacial-blue" />
+              <div className="w-9 h-9 rounded-sm bg-polar-navy border border-slate/30 flex items-center justify-center text-glacial-blue">
+                <Cpu className="w-4 h-4 text-glacial-blue" />
               </div>
               <div>
                 <div className="text-[10px] text-glacial-blue font-bold tracking-widest uppercase">
                   MULTI-OBJECTIVE NAVIGATION DECISION
                 </div>
                 <h2 className="text-base sm:text-lg font-bold text-ice-white">
-                  {currentRoute?.name || 'ROUTE B (OPTIMAL AI CORRIDOR)'}
+                  {currentRoute?.name || 'ROUTE B (OPTIMAL CORRIDOR)'}
                 </h2>
               </div>
             </div>
 
             {/* Interactive Route Corridor Selector Tabs */}
-            <div className="flex items-center gap-1.5 bg-navy/80 p-1 rounded border border-slate/30">
-              {availableRoutes.map((r) => {
+            <div className="flex items-center gap-1 bg-navy/90 p-1 rounded-sm border border-slate/30">
+              {routes.map((r) => {
                 const isSelected = currentRoute?.id === r.id;
-                const isOptimal = r.recommended || r.id?.includes('route-b');
+                const isOptimal = r.recommended || r.optimization_mode === 'BALANCED' || r.id?.includes('route-b');
+                const tabLabel = r.optimization_mode === 'BALANCED' ? 'Route B (Optimal)' :
+                                 r.optimization_mode === 'SAFEST' ? 'Route C (Safest)' :
+                                 r.optimization_mode === 'FASTEST' ? 'Route A (Direct)' :
+                                 r.name?.includes('ROUTE B') ? 'Route B (Optimal)' :
+                                 r.name?.includes('ROUTE C') ? 'Route C (Safest)' : 'Route A (Direct)';
                 return (
                   <button
                     key={r.id}
                     type="button"
-                    onClick={() => setSelectedRouteId(r.id)}
+                    onClick={() => setActiveRouteId(r.id)}
                     className={cn(
-                      "px-2.5 py-1 rounded text-[10px] font-bold font-mono transition-all",
+                      "px-2.5 py-1 rounded-sm text-[10px] font-bold font-mono transition-all",
                       isSelected
-                        ? (isOptimal ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-sm" : "bg-glacial-blue/20 text-glacial-blue border border-glacial-blue/50 shadow-sm")
+                        ? (isOptimal ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" : "bg-glacial-blue/20 text-glacial-blue border border-glacial-blue/40")
                         : "text-slate-400 hover:text-white hover:bg-polar-navy/60"
                     )}
                   >
-                    {r.name?.includes('ROUTE B') ? 'Route B (Optimal)' : r.name?.includes('ROUTE C') ? 'Route C (Safest)' : 'Route A (Direct)'}
+                    {tabLabel}
                   </button>
                 );
               })}
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+              <span className="px-2 py-0.5 rounded-sm text-[10px] font-bold font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3" />
                 MINIMUM COMPOSITE COST
               </span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-polar-navy/60 text-ice-blue border border-slate/20">
-                RIO: {currentRoute?.rioScore ?? '+8.4'}
+              <span className="px-2 py-0.5 rounded-sm text-[10px] font-bold font-mono bg-polar-navy/60 text-ice-blue border border-slate/20">
+                {(() => {
+                  const rioVal = typeof currentRoute?.rioScore === 'number' ? currentRoute.rioScore : parseFloat(String(currentRoute?.rioScore || '0')) || 0;
+                  return `RIO: ${rioVal > 0 ? `+${rioVal.toFixed(1)}` : rioVal.toFixed(1)}`;
+                })()}
               </span>
             </div>
           </div>
 
           {/* DYNAMIC EXPLANATION TEXT */}
-          <div className="space-y-3 font-mono">
+          <div className="space-y-2.5 font-mono">
             <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <Radio className="w-3.5 h-3.5 text-glacial-blue animate-pulse" />
+              <Radio className="w-3.5 h-3.5 text-glacial-blue" />
               Algorithmic Decision Justification:
             </div>
-            <p className="text-sm text-slate-200 leading-relaxed bg-polar-navy/60 p-4 rounded border border-slate/20 border-l-4 border-l-glacial-blue">
+            <p className="text-xs sm:text-sm text-slate-200 leading-relaxed bg-navy/80 p-3.5 rounded-sm border border-slate/20 border-l-2 border-l-glacial-blue">
               {explanation}
             </p>
           </div>
@@ -226,25 +217,25 @@ export const IntelligencePage: React.FC = () => {
         </div>
 
         {/* Verified AI/ML Model Empirical Benchmarks */}
-        <div className="p-5 rounded-md bg-polar-navy/40 border border-slate/20 font-mono space-y-4">
+        <div className="p-5 rounded-sm bg-polar-navy/30 border border-slate/20 font-mono space-y-4">
           <div className="flex items-center justify-between border-b border-slate/20 pb-3">
             <div className="flex items-center gap-2">
               <Cpu className="w-4 h-4 text-glacial-blue" />
               <h3 className="text-xs font-bold text-ice-white uppercase tracking-wider">
-                Trained AI/ML Models & Empirical Evaluation Benchmarks
+                Trained Environmental Prediction Models &amp; Empirical Evaluation Benchmarks
               </h3>
             </div>
-            <span className="px-2 py-0.5 rounded text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
+            <span className="px-2 py-0.5 rounded-sm text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
               4 VERIFIED MODULES
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
             {/* Module 1 */}
-            <div className="p-3 bg-navy/80 rounded border border-slate/20 space-y-2">
+            <div className="p-3 bg-navy/80 rounded-sm border border-slate/20 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-cyan-400 font-bold">AI MODULE 1</span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">SIC SATELLITE</span>
+                <span className="text-[10px] text-cyan-400 font-bold">PREDICTION MODULE 1</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-sm bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">SIC SATELLITE</span>
               </div>
               <div className="font-bold text-ice-white text-[11px] leading-tight">
                 Sea Ice Concentration Predictor
@@ -270,10 +261,10 @@ export const IntelligencePage: React.FC = () => {
             </div>
 
             {/* Module 2 */}
-            <div className="p-3 bg-navy/80 rounded border border-slate/20 space-y-2">
+            <div className="p-3 bg-navy/80 rounded-sm border border-slate/20 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-rose-400 font-bold">AI MODULE 2</span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30">DRIFT KINEMATICS</span>
+                <span className="text-[10px] text-rose-400 font-bold">KINEMATIC MODULE 2</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-sm bg-rose-500/10 text-rose-300 border border-rose-500/30">DRIFT KINEMATICS</span>
               </div>
               <div className="font-bold text-ice-white text-[11px] leading-tight">
                 Iceberg Trajectory Predictor
@@ -299,10 +290,10 @@ export const IntelligencePage: React.FC = () => {
             </div>
 
             {/* Module 3 */}
-            <div className="p-3 bg-navy/80 rounded border border-slate/20 space-y-2">
+            <div className="p-3 bg-navy/80 rounded-sm border border-slate/20 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-amber-400 font-bold">AI MODULE 3</span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30">RADAR CLASSIFIER</span>
+                <span className="text-[10px] text-amber-400 font-bold">DETECTION MODULE 3</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-sm bg-amber-500/10 text-amber-300 border border-amber-500/30">RADAR CLASSIFIER</span>
               </div>
               <div className="font-bold text-ice-white text-[11px] leading-tight">
                 Sentinel-1A SAR Ice Detector
@@ -328,10 +319,10 @@ export const IntelligencePage: React.FC = () => {
             </div>
 
             {/* Module 4 */}
-            <div className="p-3 bg-navy/80 rounded border border-slate/20 space-y-2">
+            <div className="p-3 bg-navy/80 rounded-sm border border-slate/20 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-emerald-400 font-bold">AI MODULE 4</span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">DYNAMIC A*</span>
+                <span className="text-[10px] text-emerald-400 font-bold">PATHFINDING MODULE 4</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-sm bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">DYNAMIC A*</span>
               </div>
               <div className="font-bold text-ice-white text-[11px] leading-tight">
                 Polar Dynamic Routing Engine
@@ -362,7 +353,7 @@ export const IntelligencePage: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
           {/* COLUMN 1: SENSOR PIPELINE & REAL DATA PROVENANCE */}
-          <div className="p-5 rounded-md bg-polar-navy/30 border border-slate/20 space-y-4 font-mono">
+          <div className="p-5 rounded-sm bg-polar-navy/30 border border-slate/20 space-y-4 font-mono">
             <div className="flex items-center justify-between border-b border-slate/20 pb-3">
               <div className="flex items-center gap-2">
                 <Radio className="w-4 h-4 text-emerald-400" />
@@ -448,7 +439,7 @@ export const IntelligencePage: React.FC = () => {
           </div>
 
           {/* COLUMN 2: ACTIVE HAZARD & LOG EVENTS FEED */}
-          <div className="p-5 rounded-md bg-polar-navy/30 border border-slate/20 space-y-4 font-mono">
+          <div className="p-5 rounded-sm bg-polar-navy/30 border border-slate/20 space-y-4 font-mono">
             <div className="flex items-center justify-between border-b border-slate/20 pb-3">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-400" />
@@ -469,7 +460,7 @@ export const IntelligencePage: React.FC = () => {
                   <div 
                     key={a.id || idx}
                     className={cn(
-                      "p-3 rounded border text-xs space-y-1.5",
+                      "p-3 rounded-sm border text-xs space-y-1.5",
                       isHigh 
                         ? "bg-risk-high/10 border-risk-high/30" 
                         : "bg-navy/70 border-slate/20"
@@ -498,11 +489,11 @@ export const IntelligencePage: React.FC = () => {
           
           <Link 
             to="/analysis"
-            className="p-4 rounded-md bg-polar-navy/30 border border-slate/20 hover:border-glacial-blue/50 transition-all group flex flex-col justify-between space-y-3"
+            className="p-4 rounded-sm bg-polar-navy/30 border border-slate/20 hover:border-glacial-blue/50 transition-all group flex flex-col justify-between space-y-3"
           >
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <div className="p-2 rounded bg-polar-navy border border-slate/20 text-glacial-blue group-hover:text-white">
+                <div className="p-2 rounded-sm bg-polar-navy border border-slate/20 text-glacial-blue group-hover:text-white">
                   <Activity className="w-4 h-4" />
                 </div>
                 <ArrowRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-glacial-blue transition-transform group-hover:translate-x-1" />
@@ -522,11 +513,11 @@ export const IntelligencePage: React.FC = () => {
 
           <Link 
             to="/alerts"
-            className="p-4 rounded-md bg-polar-navy/30 border border-slate/20 hover:border-amber-400/50 transition-all group flex flex-col justify-between space-y-3"
+            className="p-4 rounded-sm bg-polar-navy/30 border border-slate/20 hover:border-amber-400/50 transition-all group flex flex-col justify-between space-y-3"
           >
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <div className="p-2 rounded bg-polar-navy border border-slate/20 text-amber-400 group-hover:text-white">
+                <div className="p-2 rounded-sm bg-polar-navy border border-slate/20 text-amber-400 group-hover:text-white">
                   <AlertTriangle className="w-4 h-4" />
                 </div>
                 <ArrowRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-amber-400 transition-transform group-hover:translate-x-1" />
@@ -546,7 +537,7 @@ export const IntelligencePage: React.FC = () => {
 
           <Link 
             to="/reports"
-            className="p-4 rounded-md bg-polar-navy/30 border border-slate/20 hover:border-emerald-400/50 transition-all group flex flex-col justify-between space-y-3"
+            className="p-4 rounded-sm bg-polar-navy/30 border border-slate/20 hover:border-emerald-400/50 transition-all group flex flex-col justify-between space-y-3"
           >
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">

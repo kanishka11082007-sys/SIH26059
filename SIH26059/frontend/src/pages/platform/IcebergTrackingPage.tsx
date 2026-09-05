@@ -312,7 +312,7 @@ export const IcebergTrackingPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-sm bg-polar-navy/90 hover:bg-polar-navy border border-slate/40 text-slate-300 hover:text-white text-xs font-mono flex items-center gap-1.5 shadow-lg backdrop-blur-md cursor-pointer transition-all hover:border-glacial-blue/50"
+            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-sm bg-navy/90 hover:bg-polar-navy border border-slate/30 text-slate-300 hover:text-white text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all"
             title={isSidebarOpen ? "Hide Left Panel for clean full-screen map" : "Show Targets Panel"}
           >
             {isSidebarOpen ? (

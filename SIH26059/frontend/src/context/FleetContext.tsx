@@ -66,6 +66,7 @@ export interface RouteOption {
   id: string;
   name: string;
   vessel_id?: string;
+  optimization_mode?: 'BALANCED' | 'SAFEST' | 'FASTEST' | string;
   distance: number;
   eta: string;
   iceRisk?: string;
@@ -75,6 +76,17 @@ export interface RouteOption {
   recommended?: boolean;
   rioScore?: string | number;
   sicExposure?: number;
+  sic_actual?: number;
+  sic_cost_contribution?: number;
+  minimum_cpa_km?: number;
+  sea_ice_exposure?: {
+    fast_ice_km?: number;
+    pack_ice_km?: number;
+    open_water_km?: number;
+    avg_sic?: number;
+    sic_actual?: number;
+    sic_cost_contribution?: number;
+  };
   reason?: string;
   decision_explanation?: string;
   decision_support?: {
@@ -107,7 +119,7 @@ export interface RouteOption {
 export const CANONICAL_FLEET: CanonicalVessel[] = [
   {
     id: 'rv_sagar_nidhi',
-    name: 'R/V Sagar Nidhi — DEMO',
+    name: 'R/V Sagar Nidhi',
     flag: '🇮🇳',
     country: 'India',
     operator: 'National Centre for Polar and Ocean Research (NCPOR)',
@@ -841,34 +853,21 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const cpa = res.cpa_km || res.iceberg?.cpa_km || 4.2;
 
         if (res.routes?.length) {
-          const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => ({
-            id: r.id || (idx === 0 ? 'route-tactical' : idx === 1 ? 'route-b' : 'route-c'),
-            name: r.name || (idx === 0 ? 'ROUTE B (TACTICAL BYPASS)' : 'ROUTE OPTION'),
-            vessel_id: selectedVessel?.id,
-            distance: typeof r.distance_km === 'number' ? r.distance_km : parseFloat(String(r.distance || '').replace(/[^0-9.]/g, '')) || 3817,
-            eta: r.eta || '32h 45m',
-            iceRisk: r.iceRisk || 'LOW (EVADED)',
-            icebergRisk: 'SAFE (DIVERTED)',
-            weatherRisk: r.weatherRisk || 'MODERATE',
-            overallScore: r.overallScore || 94,
-            recommended: r.recommended ?? (idx === 0),
-            rioScore: r.rioScore ?? '+8.4',
-            sicExposure: r.sicExposure ?? 22,
-            reason: r.reason || 'Tactical iceberg evasion corridor.',
-            decision_explanation: r.decision_explanation || r.reason,
-            fuelConsumption: r.fuelConsumption || r.fuel_estimate || '106 MT',
-            safetyMargin: 'VERIFIED',
-            costs: r.costs || {},
-            cost_breakdown: r.cost_breakdown || {},
-            has_iceberg_hazard: true,
-            iceberg_threat: res.iceberg,
-            path: r.path || [],
-            waypoints: r.waypoints || []
-          }));
+          const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => {
+            const parsed = parseRouteOption(r, selectedVessel, idx);
+            if (idx === 0) {
+              parsed.id = res.diverted_route?.id || `${selectedVessel.id}-route-tactical`;
+              parsed.name = res.diverted_route?.name || 'ROUTE B (TACTICAL BYPASS)';
+              parsed.recommended = true;
+              parsed.has_iceberg_hazard = true;
+              parsed.iceberg_threat = res.iceberg;
+            }
+            return parsed;
+          });
           const emCacheKey = `${selectedVessel.id}_${selectedDestination.id}_em_${whatIfScenario.active ? 'whatif' : 'norm'}`;
           routeCacheRef.current.set(emCacheKey, formatted);
           setRoutes(formatted);
-          setActiveRouteId(res.diverted_route.id || formatted[0].id);
+          setActiveRouteId(res.diverted_route?.id || formatted[0].id);
         }
 
         // Phase 2: Route optimized with small direction change & alert logged to DB
@@ -962,6 +961,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {
         id: `${vessel.id}-route-b`,
         name: 'ROUTE B (OPTIMAL)',
+        optimization_mode: 'BALANCED',
         vessel_id: vessel.id,
         distance: distB,
         eta: `${hB}h 15m`,
@@ -970,8 +970,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         weatherRisk: 'MODERATE',
         overallScore: 92,
         recommended: true,
-        rioScore: '+8.4',
+        rioScore: 8.4,
         sicExposure: 24,
+        sic_actual: 24.0,
+        sic_cost_contribution: 0,
         reason: `Multi-objective AI optimal corridor towards ${dest.name}. Balances open leads with iceberg separation.`,
         fuelConsumption: `${Math.round(distB * 0.024)} MT`,
         safetyMargin: 'OPTIMAL',
@@ -981,6 +983,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {
         id: `${vessel.id}-route-c`,
         name: 'ROUTE C (SAFEST)',
+        optimization_mode: 'SAFEST',
         vessel_id: vessel.id,
         distance: distC,
         eta: `${hC}h 30m`,
@@ -989,8 +992,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         weatherRisk: 'LOW',
         overallScore: 86,
         recommended: false,
-        rioScore: '+14.8',
+        rioScore: 14.8,
         sicExposure: 8,
+        sic_actual: 8.0,
+        sic_cost_contribution: 0,
         reason: `Maximum safety margin corridor skirting Marginal Ice Zone perimeter towards ${dest.name}.`,
         fuelConsumption: `${Math.round(distC * 0.028)} MT`,
         safetyMargin: 'VERIFIED',
@@ -1000,6 +1005,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {
         id: `${vessel.id}-route-a`,
         name: 'ROUTE A (FASTEST)',
+        optimization_mode: 'FASTEST',
         vessel_id: vessel.id,
         distance: distA,
         eta: `${hA}h 45m`,
@@ -1008,8 +1014,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         weatherRisk: 'MODERATE',
         overallScore: 48,
         recommended: false,
-        rioScore: '-2.8',
+        rioScore: -2.8,
         sicExposure: 65,
+        sic_actual: 65.0,
+        sic_cost_contribution: 0,
         reason: `Direct geodesic path towards ${dest.name}. Shortest track but encounters heavy multi-year pack ice.`,
         fuelConsumption: `${Math.round(distA * 0.035)} MT`,
         safetyMargin: 'CAUTION',
@@ -1017,6 +1025,80 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         waypoints: []
       }
     ];
+  }, []);
+
+  // Canonical route option parser mapping raw backend response to strongly typed RouteOption
+  const parseRouteOption = useCallback((r: any, vessel: CanonicalVessel, idx: number): RouteOption => {
+    const mode: 'BALANCED' | 'SAFEST' | 'FASTEST' = r.optimization_mode || (idx === 1 ? 'BALANCED' : idx === 2 ? 'SAFEST' : 'FASTEST');
+    const routeSuffix = mode === 'SAFEST' ? 'route-c' : mode === 'FASTEST' ? 'route-a' : 'route-b';
+    const id = r.id || `${vessel.id}-${routeSuffix}`;
+    const name = r.name || (mode === 'BALANCED' ? 'ROUTE B - OPTIMAL' : mode === 'SAFEST' ? 'ROUTE C - SAFEST' : 'ROUTE A - FASTEST');
+
+    const rawDist = typeof r.distance_km === 'number' ? r.distance_km : parseFloat(String(r.distance || '').replace(/[^0-9.]/g, '')) || 0;
+    const distance = Math.round(rawDist);
+
+    const rawSic = r.sic_actual ?? r.sea_ice_exposure?.sic_actual ?? r.sea_ice_exposure?.avg_sic ?? r.sicExposure;
+    const sic_actual = typeof rawSic === 'number' ? Math.round(rawSic * 10) / 10 : (parseFloat(String(rawSic || '0')) || 0);
+    const sicExposure = typeof r.sicExposure === 'number' ? r.sicExposure : Math.round(sic_actual);
+    const sic_cost_contribution = r.sic_cost_contribution ?? r.sea_ice_exposure?.sic_cost_contribution ?? r.costs?.ice_cost ?? 0;
+
+    const rawRio = r.rioScore ?? r.rio_score;
+    const rioScore = rawRio !== undefined ? rawRio : (mode === 'FASTEST' ? -2.8 : mode === 'SAFEST' ? 14.8 : 8.4);
+
+    const overallScore = typeof r.overallScore === 'number' ? r.overallScore : (typeof r.overall_score === 'number' ? r.overall_score : (mode === 'BALANCED' ? 92 : mode === 'SAFEST' ? 84 : 48));
+
+    const minCpa = r.minimum_cpa_km ?? r.min_cpa_km;
+    const hasIceberg = Boolean(r.has_iceberg_hazard || (minCpa !== undefined && minCpa <= 30.0));
+    const icebergEncounters = r.icebergEncounters ?? (hasIceberg ? 1 : 0);
+    const icebergRisk = r.icebergRisk || (minCpa && minCpa < 15 ? 'HIGH' : minCpa && minCpa < 30 ? 'MODERATE' : 'LOW');
+
+    const fuelConsumption = r.fuelConsumption || r.fuel_estimate || (r.costs?.fuel_cost ? `${Math.round(r.costs.fuel_cost * 0.15)} MT` : '104 MT');
+
+    return {
+      id,
+      name,
+      vessel_id: vessel.id,
+      optimization_mode: mode,
+      distance,
+      eta: r.eta || (r.eta_hours ? `${Math.floor(r.eta_hours)}h ${Math.round((r.eta_hours % 1) * 60)}m` : '32h 05m'),
+      iceRisk: r.iceRisk || r.ice_risk || (mode === 'FASTEST' ? 'HIGH' : mode === 'BALANCED' ? 'MODERATE' : 'LOW'),
+      icebergRisk,
+      weatherRisk: r.weatherRisk || 'MODERATE',
+      overallScore,
+      recommended: Boolean(r.recommended ?? (mode === 'BALANCED' || idx === 1)),
+      rioScore,
+      sicExposure,
+      sic_actual,
+      sic_cost_contribution,
+      minimum_cpa_km: minCpa,
+      icebergEncounters,
+      has_iceberg_hazard: hasIceberg,
+      iceberg_threat: r.iceberg_threat,
+      sea_ice_exposure: r.sea_ice_exposure,
+      reason: r.reason || `Optimized polar corridor for ${vessel.name}.`,
+      decision_explanation: r.decision_explanation || r.reason || `Optimized polar corridor for ${vessel.name}.`,
+      decision_support: r.decision_support || undefined,
+      fuelConsumption,
+      safetyMargin: r.safetyMargin || (mode === 'SAFEST' ? 'VERIFIED' : 'OPTIMAL'),
+      costs: r.costs || r.cost_breakdown || {},
+      cost_breakdown: r.cost_breakdown || r.costs || {},
+      path: r.path || [],
+      waypoints: r.waypoints || []
+    };
+  }, []);
+
+  // Resolves the active route ID stably: preserves current mode (SAFEST/FASTEST/BALANCED) if possible
+  const resolveTargetRouteId = useCallback((availableRoutes: RouteOption[], prevRouteId: string): string => {
+    if (!availableRoutes.length) return 'route-b';
+    const exact = availableRoutes.find(r => r.id === prevRouteId);
+    if (exact) return exact.id;
+
+    const prevMode = prevRouteId.includes('route-c') ? 'SAFEST' : prevRouteId.includes('route-a') ? 'FASTEST' : 'BALANCED';
+    const modeMatch = availableRoutes.find(r => r.optimization_mode === prevMode);
+    if (modeMatch) return modeMatch.id;
+
+    const rec = availableRoutes.find(r => r.recommended) || availableRoutes[0];
+    return rec.id;
   }, []);
 
   // Recompute route actively on demand (clearing cache)
@@ -1037,46 +1119,26 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         emergency: emergencyRerouteActive
       });
       if (res?.routes?.length) {
-        const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => ({
-          id: r.id || (idx === 1 ? 'route-b' : idx === 2 ? 'route-c' : 'route-a'),
-          name: r.name || (idx === 1 ? 'ROUTE B (OPTIMAL)' : idx === 2 ? 'ROUTE C (SAFEST)' : 'ROUTE A (FASTEST)'),
-          vessel_id: selectedVessel.id,
-          distance: typeof r.distance_km === 'number' ? r.distance_km : parseFloat(String(r.distance || '').replace(/[^0-9.]/g, '')) || 3800,
-          eta: r.eta || '32h 05m',
-          iceRisk: r.iceRisk || r.ice_risk || (r.id?.includes('route-a') ? 'HIGH' : r.id?.includes('route-b') ? 'MODERATE' : 'LOW'),
-          icebergRisk: r.icebergRisk || 'LOW',
-          weatherRisk: r.weatherRisk || 'MODERATE',
-          overallScore: r.overallScore || (r.id?.includes('route-b') ? 92 : r.id?.includes('route-c') ? 84 : 48),
-          recommended: r.recommended ?? (r.id?.includes('route-b') || idx === 1),
-          rioScore: r.rioScore ?? r.rio_score ?? (r.id?.includes('route-a') ? -2.8 : r.id?.includes('route-b') ? 8.4 : 14.8),
-          sicExposure: r.sicExposure ?? (r.id?.includes('route-a') ? 65 : r.id?.includes('route-b') ? 22 : 6),
-          reason: r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
-          decision_explanation: r.decision_explanation || r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
-          decision_support: r.decision_support || undefined,
-          fuelConsumption: r.fuelConsumption || r.fuel_estimate || '104 MT',
-          safetyMargin: r.safetyMargin || 'OPTIMAL',
-          costs: r.costs || r.cost_breakdown || {},
-          cost_breakdown: r.cost_breakdown || r.costs || {},
-          path: r.path || [],
-          waypoints: r.waypoints || []
-        }));
+        const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => parseRouteOption(r, selectedVessel, idx));
         routeCacheRef.current.set(cacheKey, formatted);
         setRoutes(formatted);
-        setActiveRouteId(formatted[0].id);
+        setActiveRouteId(prev => resolveTargetRouteId(formatted, prev));
       } else {
         const fallback = generateFallbackCorridors(selectedVessel, selectedDestination);
         routeCacheRef.current.set(cacheKey, fallback);
         setRoutes(fallback);
+        setActiveRouteId(prev => resolveTargetRouteId(fallback, prev));
       }
     } catch (e) {
       console.error('Failed to recompute routes, using fallback:', e);
       const fallback = generateFallbackCorridors(selectedVessel, selectedDestination);
       routeCacheRef.current.set(cacheKey, fallback);
       setRoutes(fallback);
+      setActiveRouteId(prev => resolveTargetRouteId(fallback, prev));
     } finally {
       setIsComputingRoutes(false);
     }
-  }, [selectedVessel, selectedDestination, emergencyRerouteActive, whatIfScenario.active, generateFallbackCorridors]);
+  }, [selectedVessel, selectedDestination, emergencyRerouteActive, whatIfScenario.active, generateFallbackCorridors, parseRouteOption, resolveTargetRouteId]);
 
   // Fetch / update corridors reactively for the selected vessel AND destination with zero-delay client caching
   useEffect(() => {
@@ -1085,7 +1147,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const cacheKey = `${selectedVessel.id}_${selectedDestination.id}_${emergencyRerouteActive ? 'em' : 'norm'}_${whatIfScenario.active ? 'whatif' : 'norm'}`;
 
     if (routeCacheRef.current.has(cacheKey)) {
-      setRoutes(routeCacheRef.current.get(cacheKey)!);
+      const cached = routeCacheRef.current.get(cacheKey)!;
+      setRoutes(cached);
+      setActiveRouteId(prev => resolveTargetRouteId(cached, prev));
+      setIsComputingRoutes(false);
       return;
     }
     
@@ -1101,41 +1166,22 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }).then((res) => {
       if (isCancelled) return;
       if (res?.routes?.length) {
-        const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => ({
-          id: r.id || (idx === 1 ? 'route-b' : idx === 2 ? 'route-c' : 'route-a'),
-          name: r.name || (idx === 1 ? 'ROUTE B (OPTIMAL)' : idx === 2 ? 'ROUTE C (SAFEST)' : 'ROUTE A (FASTEST)'),
-          vessel_id: selectedVessel.id,
-          distance: typeof r.distance_km === 'number' ? r.distance_km : parseFloat(String(r.distance || '').replace(/[^0-9.]/g, '')) || 3800,
-          eta: r.eta || '32h 05m',
-          iceRisk: r.iceRisk || r.ice_risk || (r.id?.includes('route-a') ? 'HIGH' : r.id?.includes('route-b') ? 'MODERATE' : 'LOW'),
-          icebergRisk: r.icebergRisk || 'LOW',
-          weatherRisk: r.weatherRisk || 'MODERATE',
-          overallScore: r.overallScore || (r.id?.includes('route-b') ? 92 : r.id?.includes('route-c') ? 84 : 48),
-          recommended: r.recommended ?? (r.id?.includes('route-b') || idx === 1),
-          rioScore: r.rioScore ?? r.rio_score ?? (r.id?.includes('route-a') ? -2.8 : r.id?.includes('route-b') ? 8.4 : 14.8),
-          sicExposure: r.sicExposure ?? (r.id?.includes('route-a') ? 65 : r.id?.includes('route-b') ? 22 : 6),
-          reason: r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
-          decision_explanation: r.decision_explanation || r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
-          decision_support: r.decision_support || undefined,
-          fuelConsumption: r.fuelConsumption || r.fuel_estimate || '104 MT',
-          safetyMargin: r.safetyMargin || 'OPTIMAL',
-          costs: r.costs || r.cost_breakdown || {},
-          cost_breakdown: r.cost_breakdown || r.costs || {},
-          path: r.path || [],
-          waypoints: r.waypoints || []
-        }));
+        const formatted: RouteOption[] = res.routes.map((r: any, idx: number) => parseRouteOption(r, selectedVessel, idx));
         routeCacheRef.current.set(cacheKey, formatted);
         setRoutes(formatted);
+        setActiveRouteId(prev => resolveTargetRouteId(formatted, prev));
       } else {
         const fallback = generateFallbackCorridors(selectedVessel, selectedDestination);
         routeCacheRef.current.set(cacheKey, fallback);
         setRoutes(fallback);
+        setActiveRouteId(prev => resolveTargetRouteId(fallback, prev));
       }
     }).catch(() => {
       if (isCancelled) return;
       const fallback = generateFallbackCorridors(selectedVessel, selectedDestination);
       routeCacheRef.current.set(cacheKey, fallback);
       setRoutes(fallback);
+      setActiveRouteId(prev => resolveTargetRouteId(fallback, prev));
     }).finally(() => {
       if (!isCancelled) {
         setIsComputingRoutes(false);
@@ -1145,11 +1191,16 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => {
       isCancelled = true;
     };
-  }, [selectedVessel?.id, selectedDestination?.id, selectedDestination?.latitude, selectedDestination?.longitude, emergencyRerouteActive, whatIfScenario.active, generateFallbackCorridors]);
+  }, [selectedVessel?.id, selectedDestination?.id, selectedDestination?.latitude, selectedDestination?.longitude, emergencyRerouteActive, whatIfScenario.active, generateFallbackCorridors, parseRouteOption, resolveTargetRouteId]);
 
-  // Derive active route
+  // Authoritative active route derived from routes and activeRouteId
   const activeRoute = useMemo(() => {
-    return routes.find(r => r.id === activeRouteId || r.id?.includes(activeRouteId)) || routes[0] || null;
+    if (!routes || routes.length === 0) return null;
+    return routes.find(r => r.id === activeRouteId) ||
+           routes.find(r => r.id?.includes(activeRouteId)) ||
+           routes.find(r => r.recommended) ||
+           routes[0] ||
+           null;
   }, [routes, activeRouteId]);
 
   // 1. Calculate deterministic display fleet at selected forecast horizon
@@ -1243,27 +1294,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       let newRoutes: RouteOption[] = [];
       if (optRes?.routes?.length) {
-        newRoutes = optRes.routes.map((r: any, idx: number) => ({
-          id: r.id || (idx === 1 ? `${vessel.id}-route-b` : idx === 2 ? `${vessel.id}-route-c` : `${vessel.id}-route-a`),
-          name: r.name || (idx === 1 ? 'ROUTE B (OPTIMAL)' : idx === 2 ? 'ROUTE C (SAFEST)' : 'ROUTE A (FASTEST)'),
-          vessel_id: vessel.id,
-          distance: typeof r.distance_km === 'number' ? r.distance_km : parseFloat(String(r.distance || '').replace(/[^0-9.]/g, '')) || 3800,
-          eta: r.eta || '32h 05m',
-          iceRisk: r.iceRisk || 'MODERATE',
-          icebergRisk: r.icebergRisk || 'LOW',
-          weatherRisk: r.weatherRisk || 'MODERATE',
-          overallScore: r.overallScore || 90,
-          recommended: r.recommended ?? (idx === 1),
-          rioScore: r.rioScore ?? '+8.4',
-          sicExposure: r.sicExposure ?? 20,
-          reason: r.reason || `Optimized polar navigation corridor towards ${destStation.name}.`,
-          decision_explanation: r.decision_explanation || r.reason,
-          decision_support: r.decision_support || undefined,
-          fuelConsumption: r.fuelConsumption || r.fuel_estimate || '104 MT',
-          safetyMargin: 'OPTIMAL',
-          path: r.path || [],
-          waypoints: r.waypoints || []
-        }));
+        newRoutes = optRes.routes.map((r: any, idx: number) => parseRouteOption(r, vessel, idx));
       } else {
         const tempV: CanonicalVessel = {
           ...vessel,

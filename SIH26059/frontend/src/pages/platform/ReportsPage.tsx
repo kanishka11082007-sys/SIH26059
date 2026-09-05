@@ -141,7 +141,7 @@ export const ReportsPage: React.FC = () => {
             type="button"
             onClick={handleDownload}
             disabled={isExporting}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-sm bg-gradient-to-r from-signature-coral to-deep-coral hover:from-soft-coral hover:to-signature-coral text-white text-xs font-mono font-bold transition-all shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-sm bg-signature-coral hover:bg-soft-coral text-white text-xs font-mono font-bold transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
             <span>{isExporting ? 'Exporting...' : 'Export JSON'}</span>
@@ -172,7 +172,7 @@ export const ReportsPage: React.FC = () => {
         </div>
 
         {/* Formal Report Document Display */}
-        <div className="bg-polar-navy/30 border border-slate/20 rounded-sm p-6 sm:p-8 space-y-6 shadow-xl text-xs">
+        <div className="bg-polar-navy/30 border border-slate/20 rounded-sm p-6 sm:p-8 space-y-6 text-xs">
           
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate/20 pb-4">
@@ -180,7 +180,7 @@ export const ReportsPage: React.FC = () => {
               <span className="text-[10px] text-glacial-blue tracking-widest uppercase font-semibold block mb-1">
                 INTERNATIONAL MARITIME ORGANIZATION (IMO) POLARIS PROTOCOL
               </span>
-              <h3 className="text-xl font-bold text-ice-white font-sans">{selectedReport.title}</h3>
+              <h3 className="text-base sm:text-lg font-bold text-ice-white font-sans">{selectedReport.title}</h3>
               <p className="text-slate-400 mt-1 text-xs">Vessel: {selectedReport.vessel} • Polar Class: {selectedReport.polarClass}</p>
             </div>
 

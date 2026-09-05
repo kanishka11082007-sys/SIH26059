@@ -277,7 +277,7 @@ export const SeaIcePage: React.FC = () => {
 
               {/* Detections display */}
               {loadingRadar ? (
-                <div className="p-3 bg-polar-navy/20 border border-slate/20 rounded-sm text-center font-mono text-xs text-slate-400 animate-pulse">
+                <div className="p-3 bg-polar-navy/20 border border-slate/20 rounded-sm text-center font-mono text-xs text-slate-400">
                   Processing SAR C-Band Radar Backscatter...
                 </div>
               ) : sceneDetection && (
@@ -326,7 +326,7 @@ export const SeaIcePage: React.FC = () => {
           {/* Data Provenance Strip */}
           <div className="pt-3 border-t border-slate/20 text-[10px] font-mono text-slate-400 flex items-center justify-between">
             <span className="text-emerald-400 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
               REAL DATA PIPELINE
             </span>
             <span>NOAA CDR + S1A SAR</span>
@@ -339,7 +339,7 @@ export const SeaIcePage: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-sm bg-polar-navy/90 hover:bg-polar-navy border border-slate/40 text-slate-300 hover:text-white text-xs font-mono flex items-center gap-1.5 shadow-lg backdrop-blur-md cursor-pointer transition-all hover:border-glacial-blue/50"
+            className="absolute top-3 left-3 z-40 px-2.5 py-1.5 rounded-sm bg-navy/90 hover:bg-polar-navy border border-slate/30 text-slate-300 hover:text-white text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all"
             title={isSidebarOpen ? "Hide Left Panel for clean full-screen map" : "Show Sea-Ice Controls"}
           >
             {isSidebarOpen ? (
