@@ -83,3 +83,10 @@ desktop.ini
 # 8. Local Presentation & Private Pitch Deck (Excluded from Git)
 sih_presentation/
 sih_ppt/
+
+# 9. Incomplete Downloads & Temporary Files
+*.tmp
+*.temp
+*.part
+*.crdownload
+
