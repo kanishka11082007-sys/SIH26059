@@ -63,9 +63,12 @@ metrics_sic = compute_metrics(y_sic, y_sic_pred)
 print('Sea Ice Random Forest Metrics on Dataset (N={:,}):'.format(len(y_sic)), metrics_sic)
 
 print('\n=== 5. TEST ICEBERG MODEL EVALUATION METRICS ===')
-from src.iceberg.load import load_all_tracks, prepare_trajectory_features
-df_ib_raw = load_all_tracks()
-df_ib_feats = prepare_trajectory_features(df_ib_raw)
+from src.iceberg.load import load_all_icebergs
+from src.iceberg.tracks import build_tracks
+df_ib_raw = load_all_icebergs()
+df_ib_feats = build_tracks(df_ib_raw)
+df_ib_feats = df_ib_feats.dropna(subset=["delta_lat", "delta_lon", "dt_hours"]).copy()
+df_ib_feats = df_ib_feats[(df_ib_feats["dt_hours"] > 0) & (df_ib_feats["dt_hours"] <= 72.0)]
 print(f'Total Raw Iceberg Points: {len(df_ib_raw):,}, Valid Trajectory Steps: {len(df_ib_feats):,}')
 from src.iceberg.train import prepare_features, prepare_targets
 X_ib = prepare_features(df_ib_feats).values

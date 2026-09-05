@@ -1,7 +1,9 @@
-"""Route optimizer for Phase 6.
+"""Route optimizer for Phase 6 (DEPRECATED / PROTOTYPE).
 
-Generates candidate routes with different risk/distance tradeoffs,
-evaluates them, and selects the best.
+NOTE: This module is retained for backwards-compatibility testing only.
+The AUTHORITATIVE production routing pipeline is src.optimization.polar_routing_engine.PolarRoutingEngine,
+which uses Antarctic Polar Stereographic EPSG:3031 projection, real Shapely coastlines, real satellite SIC,
+0-48h BYU iceberg trajectories, 7 cost surfaces, and IMO POLARIS compliance.
 """
 import time
 import logging

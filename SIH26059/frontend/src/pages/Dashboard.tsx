@@ -47,7 +47,7 @@ const Dashboard = () => {
         </div>
         <div className="flex items-center gap-6 text-xs font-mono text-slate">
            <div className="hidden lg:block">{new Date().toISOString().split('T')[1].substring(0, 5)} UTC</div>
-           <div className="hidden lg:block">DATA STATUS: <span className="text-risk-safe">LIVE</span></div>
+           <div className="hidden lg:block">DATA STATUS: <span className="text-risk-safe font-semibold">OPERATIONAL (REAL SATELLITE / SIMULATED AIS)</span></div>
            <div className="flex items-center gap-2 text-ice-white">
               <span className="w-2 h-2 rounded-full bg-risk-safe animate-pulse" />
               SYSTEM OPERATIONAL

@@ -81,7 +81,7 @@ export const IntelligencePage: React.FC = () => {
   };
 
   const explanation = currentRoute?.decision_explanation || currentRoute?.reason || 
-    `${currentRoute?.name || 'ROUTE B - OPTIMAL'} is recommended for ${selectedVessel.name} to ${selectedVessel.destination}. It achieves the lowest Pareto composite cost by navigating open leads, avoiding iceberg drift zones, and optimizing fuel efficiency.`;
+    `${currentRoute?.name || 'ROUTE B - OPTIMAL'} is recommended for ${selectedVessel.name} to ${selectedVessel.destination}. It achieves the lowest multi-objective composite cost by navigating open leads, avoiding iceberg drift zones, and optimizing fuel efficiency.`;
 
   return (
     <AppShell
@@ -117,7 +117,7 @@ export const IntelligencePage: React.FC = () => {
     >
       <div className="h-full overflow-y-auto custom-scrollbar p-6 lg:p-8 space-y-6 bg-navy text-ice-white font-sans selection:bg-glacial-blue selection:text-white">
 
-        {/* Active Route Decision & Pareto Cost Surface */}
+        {/* Active Route Decision & Multi-Objective Cost Surface */}
         <div className="p-6 rounded-md bg-polar-navy/40 border border-glacial-blue/30 backdrop-blur-md shadow-xl relative overflow-hidden">
           <div className="absolute top-0 right-0 w-96 h-96 bg-glacial-blue/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
           
@@ -128,7 +128,7 @@ export const IntelligencePage: React.FC = () => {
               </div>
               <div>
                 <div className="text-[10px] text-glacial-blue font-bold tracking-widest uppercase">
-                  PARETO OPTIMAL NAVIGATION DECISION
+                  MULTI-OBJECTIVE NAVIGATION DECISION
                 </div>
                 <h2 className="text-base sm:text-lg font-bold text-ice-white">
                   {currentRoute?.name || 'ROUTE B (OPTIMAL AI CORRIDOR)'}
@@ -181,7 +181,7 @@ export const IntelligencePage: React.FC = () => {
             </p>
           </div>
 
-          {/* MULTI-OBJECTIVE PARETO COST BREAKDOWN TABLE */}
+          {/* MULTI-OBJECTIVE COMPOSITE COST BREAKDOWN TABLE */}
           <div className="mt-6 pt-4 border-t border-slate/20">
             <div className="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
               <BarChart3 className="w-3.5 h-3.5 text-glacial-blue" />
@@ -346,7 +346,7 @@ export const IntelligencePage: React.FC = () => {
                   <span className="font-semibold text-emerald-400">7 Cost Surfaces</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Pareto Frontier:</span>
+                  <span className="text-slate-400">Corridor Options:</span>
                   <span className="font-semibold text-ice-blue">A / B / C Corridors</span>
                 </div>
                 <div className="flex justify-between">

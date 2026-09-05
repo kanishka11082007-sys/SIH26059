@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Loader2, Download, Zap, Ship, MapPin, Sparkles, ShieldAlert,
-  PanelLeftClose, PanelLeftOpen, Navigation
+  PanelLeftClose, PanelLeftOpen, Navigation, Clock, X, CheckCircle2
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { useApiData } from '../../hooks/useApiData';
 import { useFleet } from '../../context/FleetContext';
+import type { MissionType, OptimizationPriority } from '../../context/FleetContext';
 import { GeminiCopilotDrawer } from '../../components/GeminiCopilotDrawer';
 import { api } from '../../services/api';
 import { cn } from '../../utils/cn';
@@ -44,6 +45,7 @@ const computeHeading = (p1: [number, number], p2: [number, number]): number => {
   const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
   return Math.round((Math.atan2(y, x) * 180 / Math.PI + 360) % 360);
 };
+
 // Helper to build realistic geodesic waypoints strictly along the active route line
 const generateWaypointsForRoute = (routePath: [number, number][], routeType: string, _destName: string): Waypoint[] => {
   if (!routePath || routePath.length <= 2) return [];
@@ -96,6 +98,11 @@ export const NavigationPage: React.FC = () => {
     selectedDestinationId,
     selectedDestination,
     setSelectedDestinationId,
+    selectedHorizon,
+    setSelectedHorizon,
+    activeHorizonLabel,
+    assignMission,
+    resetVesselToAvailable,
     routes,
     activeRouteId,
     setActiveRouteId,
@@ -117,6 +124,35 @@ export const NavigationPage: React.FC = () => {
   const [customName, setCustomName] = useState('');
   const [customLat, setCustomLat] = useState('');
   const [customLon, setCustomLon] = useState('');
+
+  // Compact Mission Assignment Modal State
+  const [isMissionModalOpen, setIsMissionModalOpen] = useState(false);
+  const [modalDestinationId, setModalDestinationId] = useState('');
+  const [modalMissionType, setModalMissionType] = useState<MissionType>('RESEARCH');
+  const [modalRouteProfile, setModalRouteProfile] = useState<OptimizationPriority>('BALANCED');
+  const [isAssigningMission, setIsAssigningMission] = useState(false);
+
+  // Initialize modal destination when opening
+  useEffect(() => {
+    if (isMissionModalOpen && stations.length > 0) {
+      const other = stations.find(s => s.id !== selectedDestinationId && s.name !== selectedVessel.destination);
+      if (other) setModalDestinationId(other.id);
+      else setModalDestinationId(stations[0].id);
+    }
+  }, [isMissionModalOpen, stations, selectedDestinationId, selectedVessel.destination]);
+
+  const handleAssignMissionSubmit = async () => {
+    if (!modalDestinationId) return;
+    setIsAssigningMission(true);
+    try {
+      await assignMission(selectedVessel.id, modalDestinationId, modalMissionType, modalRouteProfile);
+      setIsMissionModalOpen(false);
+    } catch (e) {
+      console.error('Mission assignment error:', e);
+    } finally {
+      setIsAssigningMission(false);
+    }
+  };
 
   // Live iceberg data
   const [icebergs, setIcebergs] = useState<any[]>([]);
@@ -278,6 +314,33 @@ export const NavigationPage: React.FC = () => {
       subtitle={`${selectedVessel.name} • Active Polar Transit`}
       actions={
         <div className="flex items-center gap-2">
+          {/* Shared Forecast Horizon Selector (NOW / +6H / +12H / +24H / +48H) */}
+          <div className="flex items-center gap-1 bg-polar-navy/60 border border-slate/30 p-1 rounded-sm">
+            <Clock className="w-3.5 h-3.5 text-glacial-blue ml-1 mr-0.5" />
+            <span className="text-[10px] font-mono text-slate-400 mr-1 hidden sm:inline">HORIZON:</span>
+            {([
+              { h: 0, label: 'NOW' },
+              { h: 6, label: '+6H' },
+              { h: 12, label: '+12H' },
+              { h: 24, label: '+24H' },
+              { h: 48, label: '+48H' },
+            ] as const).map(({ h, label }) => (
+              <button
+                key={h}
+                type="button"
+                onClick={() => setSelectedHorizon(h)}
+                className={cn(
+                  "px-2 py-0.5 rounded-xs text-[10px] font-mono font-bold transition-all cursor-pointer",
+                  selectedHorizon === h
+                    ? "bg-cyan-500/25 text-cyan-300 border border-cyan-400/80 shadow-[0_0_8px_rgba(34,211,238,0.3)]"
+                    : "text-slate-400 hover:text-white border border-transparent"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <button
             type="button"
             onClick={() => setIsCopilotOpen(true)}
@@ -311,11 +374,92 @@ export const NavigationPage: React.FC = () => {
         )}>
           <div className="space-y-4">
             
-            {/* 1. Mission Parameters */}
+            {/* 1. Mission Parameters & Lifecycle State */}
             <div className="space-y-3">
               <div className="text-[10px] font-mono text-glacial-blue tracking-widest uppercase font-semibold">
                 01 // Mission Parameters
               </div>
+
+              {/* Mission Lifecycle Card */}
+              {selectedVessel.mission_status === 'ARRIVED' ? (
+                <div className="bg-emerald-950/40 border border-emerald-500/40 p-3 rounded-sm font-mono text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-emerald-400 font-bold flex items-center gap-1.5 text-[11px]">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      ARRIVED AT BERTH
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      COMPLETED
+                    </span>
+                  </div>
+                  <div className="text-slate-300 text-[11px]">
+                    Moored at: <strong className="text-ice-white">{selectedVessel.destination}</strong>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsMissionModalOpen(true)}
+                      className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-sm text-xs font-bold font-mono flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
+                    >
+                      <Navigation className="w-3.5 h-3.5" />
+                      <span>New Mission</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => resetVesselToAvailable(selectedVessel.id)}
+                      className="py-1.5 px-2 bg-polar-navy/60 hover:bg-polar-navy text-slate-300 rounded-sm text-[11px] font-mono border border-slate/30"
+                    >
+                      Mark Available
+                    </button>
+                  </div>
+                </div>
+              ) : selectedVessel.mission_status === 'AVAILABLE' ? (
+                <div className="bg-cyan-950/30 border border-cyan-500/30 p-3 rounded-sm font-mono text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-cyan-400 font-bold flex items-center gap-1.5 text-[11px]">
+                      <Ship className="w-3.5 h-3.5 text-cyan-400" />
+                      VESSEL AVAILABLE
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                      READY
+                    </span>
+                  </div>
+                  <p className="text-slate-400 text-[10px]">Moored and ready for scientific tasking in Antarctic sector.</p>
+                  <button
+                    type="button"
+                    onClick={() => setIsMissionModalOpen(true)}
+                    className="w-full py-1.5 px-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-sm text-xs font-bold font-mono flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span>Assign Mission</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-polar-navy/30 border border-slate/20 p-2.5 rounded-sm font-mono text-xs space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-glacial-blue font-bold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-glacial-blue animate-pulse" />
+                      UNDERWAY &bull; {selectedVessel.destination.split(' ')[0]}
+                    </span>
+                    <span className="text-slate-400 font-mono">
+                      {selectedVessel.data_status === 'LIVE' ? 'LIVE AIS' : 'SIMULATED VOYAGE'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-300">
+                    <span>ETA: <strong className="text-ice-white">{selectedVessel.eta || '32h'}</strong></span>
+                    <span>State @ <strong className="text-cyan-300">{activeHorizonLabel}</strong></span>
+                  </div>
+                  <div className="pt-1 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setIsMissionModalOpen(true)}
+                      className="text-[10px] text-glacial-blue hover:text-white transition-colors cursor-pointer"
+                    >
+                      + Reassign Mission Leg &rarr;
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Operational Vessel */}
               <div>
@@ -452,7 +596,7 @@ export const NavigationPage: React.FC = () => {
                 {isComputingRoutes && (
                   <div className="flex items-center gap-2 mt-2 px-2.5 py-1.5 bg-glacial-blue/10 border border-glacial-blue/30 rounded-sm text-[11px] font-mono text-glacial-blue animate-pulse">
                     <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                    <span>Calculating Pareto polar corridors...</span>
+                    <span>Calculating multi-objective polar corridors...</span>
                   </div>
                 )}
               </div>
@@ -473,19 +617,48 @@ export const NavigationPage: React.FC = () => {
                   <span>{emergencyRerouteActive ? "TACTICAL DIVERSION ACTIVE" : "SIMULATE HAZARD / DIVERSION"}</span>
                 </button>
 
+                {/* What-If Decision Analysis */}
                 <button
                   type="button"
                   onClick={() => setWhatIfScenario({ ...whatIfScenario, active: !whatIfScenario.active })}
                   className={cn(
-                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono transition-all flex items-center justify-center gap-1.5 border",
+                    "w-full py-1.5 px-2 rounded-sm text-[11px] font-mono transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
                     whatIfScenario.active
-                      ? "bg-amber-500/20 border-amber-500 text-amber-300"
+                      ? "bg-amber-500/20 border-amber-500 text-amber-300 font-bold"
                       : "bg-polar-navy/30 border-slate/20 text-slate-400 hover:text-slate-200"
                   )}
                 >
                   <Zap className="w-3 h-3 text-amber-400" />
-                  <span>{whatIfScenario.active ? "WHAT-IF ACTIVE (+25km Drift, +15% SIC)" : "WHAT-IF SIMULATION"}</span>
+                  <span>{whatIfScenario.active ? "WHAT-IF ACTIVE: +15% SIC & +25KM DRIFT" : "WHAT-IF DECISION ANALYSIS"}</span>
                 </button>
+
+                {/* What-If Scenario Result Strip */}
+                {whatIfScenario.active && (
+                  <div className="p-2.5 bg-amber-950/30 border border-amber-500/40 rounded-xs space-y-1.5 font-mono text-[10px] animate-in fade-in">
+                    <div className="flex items-center justify-between text-amber-300 font-bold">
+                      <span className="flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-400" />
+                        SCENARIO COMPARISON
+                      </span>
+                      <span className="px-1 rounded bg-amber-500/20 text-amber-200 text-[9px]">EVALUATED</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 text-slate-300 pt-0.5">
+                      <div className="bg-navy/60 p-1.5 rounded-2xs border border-slate/20">
+                        <span className="text-slate-400 text-[9px] block">BASELINE OPTIMAL</span>
+                        <span className="text-ice-white font-semibold">POLARIS +8.4 (RIO)</span>
+                        <span className="text-slate-400 text-[8.5px] block mt-0.5">Lead corridor nominal</span>
+                      </div>
+                      <div className="bg-navy/60 p-1.5 rounded-2xs border border-amber-500/30">
+                        <span className="text-amber-400 text-[9px] block">STRESSED (+15% SIC)</span>
+                        <span className="text-emerald-400 font-semibold">SAFEST (+14.8 RIO)</span>
+                        <span className="text-slate-300 text-[8.5px] block mt-0.5">+229 km perimeter detour</span>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-300 font-sans leading-tight pt-1 border-t border-amber-500/20">
+                      Recommendation: Under +15% sea ice surge and 25 km drift,Safest corridor is recommended to maintain safe hull stress clearance.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -551,7 +724,33 @@ export const NavigationPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {(activeRoute.decision_explanation || activeRoute.reason) && (
+                  {/* Decision Support & Hazard Intelligence */}
+                  {activeRoute.decision_support && (
+                    <div className="p-2 bg-navy/60 border border-glacial-blue/30 rounded-xs space-y-1.5 text-[10px]">
+                      <div className="flex items-center justify-between">
+                        <span className="text-glacial-blue font-semibold flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-glacial-blue" />
+                          DECISION INTELLIGENCE
+                        </span>
+                        <span className={cn(
+                          "px-1.5 py-0.2 rounded-2xs text-[9px] font-bold border",
+                          activeRoute.decision_support.dominant_hazard.includes("NOMINAL") 
+                            ? "bg-risk-safe/20 text-risk-safe border-risk-safe/40"
+                            : "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                        )}>
+                          {activeRoute.decision_support.dominant_hazard.replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                      <p className="text-slate-300 font-sans leading-tight">
+                        {activeRoute.decision_support.recommendation}
+                      </p>
+                      <div className="text-[9px] text-slate-400 font-mono flex items-center justify-between pt-0.5 border-t border-slate/10">
+                        <span>Hazard: {activeRoute.decision_support.hazard_summary}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {(activeRoute.decision_explanation || activeRoute.reason) && !activeRoute.decision_support && (
                     <p className="text-[11px] text-slate-300 font-sans leading-relaxed pt-1">
                       {activeRoute.decision_explanation || activeRoute.reason}
                     </p>
@@ -652,6 +851,7 @@ export const NavigationPage: React.FC = () => {
 
           <PolarMap
             section="navigation"
+            activeHorizon={activeHorizonLabel}
             destinationMarker={destMarker}
             activeRouteId={activeRouteId}
             onSelectRoute={(rId) => handleSelectRoute(rId)}
@@ -668,6 +868,115 @@ export const NavigationPage: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Compact Mission Assignment Modal (Step 13) */}
+      {isMissionModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-[#0b1726] border border-cyan-500/40 rounded-sm shadow-2xl max-w-sm w-full p-4 space-y-3 font-mono text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-slate/20">
+              <div className="flex items-center gap-2">
+                <Ship className="w-4 h-4 text-cyan-400" />
+                <span className="font-bold text-ice-white text-sm">Assign Mission</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMissionModalOpen(false)}
+                className="text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Vessel Info */}
+            <div>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Vessel</span>
+              <div className="p-2 bg-polar-navy/60 border border-slate/30 rounded-xs text-ice-white flex items-center justify-between">
+                <span className="font-bold">{selectedVessel.name}</span>
+                <span className="text-[10px] text-cyan-400">{selectedVessel.mission_status || 'AVAILABLE'}</span>
+              </div>
+              <span className="text-[9px] text-slate-400 mt-1 block">
+                Current Berth / Origin: <strong className="text-slate-200">{selectedVessel.destination || selectedVessel.voyage_origin || 'Station Berth'}</strong>
+              </span>
+            </div>
+
+            {/* Destination Selector */}
+            <div>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Destination</span>
+              <select
+                value={modalDestinationId}
+                onChange={(e) => setModalDestinationId(e.target.value)}
+                className="w-full bg-polar-navy/90 border border-slate/40 rounded-xs p-2 text-ice-white font-mono focus:border-cyan-400 focus:outline-none"
+              >
+                {stations.map(st => (
+                  <option key={st.id} value={st.id} className="bg-polar-navy text-ice-white">
+                    {st.name} ({st.country})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Mission Type */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Mission Type</span>
+                <select
+                  value={modalMissionType}
+                  onChange={(e) => setModalMissionType(e.target.value as MissionType)}
+                  className="w-full bg-polar-navy/90 border border-slate/40 rounded-xs p-1.5 text-xs text-ice-white font-mono focus:border-cyan-400 focus:outline-none"
+                >
+                  <option value="RESEARCH">Research</option>
+                  <option value="RESUPPLY">Resupply</option>
+                  <option value="SURVEY">Hydrographic Survey</option>
+                  <option value="ESCORT">Ice Escort</option>
+                </select>
+              </div>
+
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Route Profile</span>
+                <select
+                  value={modalRouteProfile}
+                  onChange={(e) => setModalRouteProfile(e.target.value as OptimizationPriority)}
+                  className="w-full bg-polar-navy/90 border border-slate/40 rounded-xs p-1.5 text-xs text-ice-white font-mono focus:border-cyan-400 focus:outline-none"
+                >
+                  <option value="BALANCED">Balanced</option>
+                  <option value="SAFEST">Safest (Min Ice)</option>
+                  <option value="FASTEST">Fastest (Min Time)</option>
+                  <option value="FUEL">Eco (Min Fuel)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 pt-2 border-t border-slate/20">
+              <button
+                type="button"
+                onClick={() => setIsMissionModalOpen(false)}
+                className="flex-1 py-1.5 px-3 bg-polar-navy/40 hover:bg-polar-navy text-slate-300 rounded-xs font-mono text-xs border border-slate/30 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isAssigningMission || !modalDestinationId}
+                onClick={handleAssignMissionSubmit}
+                className="flex-1 py-1.5 px-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xs font-mono font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 shadow-md"
+              >
+                {isAssigningMission ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Routing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Generate Route</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <GeminiCopilotDrawer
         isOpen={isCopilotOpen}

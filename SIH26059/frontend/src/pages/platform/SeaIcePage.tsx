@@ -11,14 +11,7 @@ import PolarMap from '../../components/map/PolarMap';
 import { cn } from '../../utils/cn';
 import { api } from '../../services/api';
 
-// Standardized 5-step forecast timeline mapped to backend tensors (0: Now, 1: +6h, 2: +12h, 3: +24h, 4: +48h)
-const TIME_MAP: Record<string, string> = {
-  'current': '0',
-  '6h': '1',
-  '12h': '2',
-  '24h': '3',
-  '48h': '4',
-};
+
 
 const SECTOR_COORDS: Record<string, [number, number]> = {
   'SEC-01': [-60.5, 20.0],
@@ -37,11 +30,13 @@ export const SeaIcePage: React.FC = () => {
     selectedDestination,
     routes,
     activeRouteId,
-    setActiveRouteId
+    setActiveRouteId,
+    selectedHorizon,
+    setSelectedHorizon,
+    activeHorizonLabel
   } = useFleet();
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [selectedSector, setSelectedSector] = useState<string>('SEC-03');
-  const [timeHorizon, setTimeHorizon] = useState<'current' | '6h' | '12h' | '24h' | '48h'>('current');
   const [focusTarget, setFocusTarget] = useState<[number, number] | null>(null);
 
   // Real Sentinel-1 SAR Radar Detection state
@@ -72,7 +67,14 @@ export const SeaIcePage: React.FC = () => {
   
   useApiData();
   
-  const apiTimeStep = TIME_MAP[timeHorizon] || '0';
+  const HORIZON_TO_TIMESTEP: Record<number, string> = {
+    0: '0',
+    6: '6',
+    12: '12',
+    24: '24',
+    48: '48'
+  };
+  const apiTimeStep = HORIZON_TO_TIMESTEP[selectedHorizon] || '0';
   const { environmental, seaIceSectors } = useTimeData(apiTimeStep);
 
   const env = environmental || {
@@ -126,29 +128,35 @@ export const SeaIcePage: React.FC = () => {
         )}>
           <div className="space-y-4">
             
-            {/* 1. Time Horizon Switcher */}
+            {/* 1. Shared Forecast Time Horizon Controls */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between font-mono text-[10px] text-slate-400 uppercase tracking-wider">
+              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 uppercase tracking-wider">
                 <span className="text-glacial-blue font-semibold flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5 text-glacial-blue" />
-                  01 // Forecast Horizon
+                  01 // Operational Horizon
                 </span>
-                <span className="text-ice-white">{env.timestep}</span>
+                <span className="text-ice-white font-bold">{activeHorizonLabel}</span>
               </div>
-              <div className="flex items-center gap-1 bg-polar-navy/30 p-1 rounded-sm border border-slate/20">
-                {(['current', '6h', '12h', '24h', '48h'] as const).map((t) => (
+              <div className="grid grid-cols-5 gap-1 bg-polar-navy/40 p-1 rounded-sm border border-slate/20">
+                {([
+                  { hours: 0, label: 'Now' },
+                  { hours: 6, label: '+6H' },
+                  { hours: 12, label: '+12H' },
+                  { hours: 24, label: '+24H' },
+                  { hours: 48, label: '+48H' }
+                ] as const).map(({ hours, label }) => (
                   <button
-                    key={t}
+                    key={hours}
                     type="button"
-                    onClick={() => setTimeHorizon(t)}
+                    onClick={() => setSelectedHorizon(hours)}
                     className={cn(
                       "flex-1 py-1 rounded-sm text-xs font-mono transition-all",
-                      timeHorizon === t
+                      selectedHorizon === hours
                         ? "bg-glacial-blue/20 text-ice-blue border border-glacial-blue/50 font-bold shadow-sm"
                         : "text-slate-400 hover:text-white"
                     )}
                   >
-                    {t === 'current' ? 'Now' : `+${t.toUpperCase()}`}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -349,6 +357,7 @@ export const SeaIcePage: React.FC = () => {
 
           <PolarMap
             section="sea-ice"
+            activeHorizon={activeHorizonLabel}
             showRoute={true}
             showVessel={true}
             timeStep={apiTimeStep}

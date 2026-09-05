@@ -1353,6 +1353,53 @@ class PolarRoutingEngine:
             if r.get("recommended"):
                 r["reason"] = factual_explanation
 
+            # Structured Decision Intelligence Object (Phase 3 Requirement #10)
+            avg_sic_val = r.get("sea_ice_exposure", {}).get("avg_sic", 0.0)
+            cpa_val = r.get("minimum_cpa_km", 99.0)
+            if avg_sic_val >= 50.0:
+                dominant_hazard = "HEAVY_PACK_ICE"
+                hazard_summary = f"High sea-ice concentration ({avg_sic_val}% avg) causing increased hull resistance and besetting risk."
+            elif cpa_val <= 20.0:
+                dominant_hazard = "ICEBERG_PROXIMITY"
+                hazard_summary = f"Narrow iceberg clearance margin ({cpa_val} km minimum CPA). Requires active radar watch."
+            elif r.get("weatherRisk") == "HIGH":
+                dominant_hazard = "WEATHER_AND_SWELL"
+                hazard_summary = "Elevated wind drag and sea swell increasing fuel consumption and passage time."
+            else:
+                dominant_hazard = "NOMINAL_OPEN_LEAD"
+                hazard_summary = "Navigating verified open water / low-concentration lead with favorable passage safety."
+
+            r_mode = r.get("optimization_mode", "BALANCED")
+            if r.get("recommended"):
+                if r_mode == "SAFEST":
+                    rec_reason = "Safest corridor recommended due to significantly reduced sea-ice and iceberg collision exposure."
+                elif r_mode == "FASTEST":
+                    rec_reason = "Fastest route recommended as environmental hazards remain well within polar vessel safety limits."
+                else:
+                    rec_reason = "Balanced corridor recommended for optimal risk-time tradeoff along navigable open leads."
+            else:
+                if r_mode == "SAFEST":
+                    rec_reason = "Alternative high-safety perimeter corridor available if conditions deteriorate."
+                elif r_mode == "FASTEST":
+                    rec_reason = "Direct corridor available for urgent passage, but incurs higher ice resistance and engine fuel load."
+                else:
+                    rec_reason = "Balanced corridor alternative."
+
+            r["decision_support"] = {
+                "route_profile": r_mode,
+                "risk_level": r.get("iceRisk", "MODERATE"),
+                "risk_score": r.get("overallScore", 80),
+                "eta": r.get("eta", "N/A"),
+                "distance": r.get("distance", "N/A"),
+                "distance_km": r.get("distance_km", 0),
+                "fuel_estimate": r.get("fuel_estimate", "N/A"),
+                "dominant_hazard": dominant_hazard,
+                "hazard_summary": hazard_summary,
+                "recommendation": rec_reason,
+                "is_recommended": bool(r.get("recommended")),
+                "provenance": "DETERMINISTIC_POLAR_ROUTING_ENGINE"
+            }
+
         return candidate_routes
 
     def _simplify_waypoints(

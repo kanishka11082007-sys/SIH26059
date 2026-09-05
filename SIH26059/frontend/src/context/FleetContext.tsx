@@ -1,6 +1,29 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { api, clearApiCache } from '../services/api';
 
+export type ForecastHorizonHours = 0 | 6 | 12 | 24 | 48;
+export type ForecastHorizonLabel = 'NOW' | '+6H' | '+12H' | '+24H' | '+48H';
+export type MissionStatus = 'AVAILABLE' | 'MISSION_ASSIGNED' | 'UNDERWAY' | 'ARRIVED';
+
+export interface VesselMission {
+  mission_id: string;
+  vessel_id: string;
+  origin: string;
+  origin_coords: [number, number];
+  destination: string;
+  destination_coords: [number, number];
+  destination_station_id?: string;
+  mission_type: MissionType;
+  route_profile: OptimizationPriority;
+  route_id?: string;
+  status: MissionStatus;
+  created_at: string;
+  departure_time: string;
+  estimated_arrival: string;
+  eta_hours: number;
+  completed_at?: string;
+}
+
 export interface CanonicalVessel {
   id: string;
   name: string;
@@ -29,6 +52,14 @@ export interface CanonicalVessel {
   mission?: string;
   eta?: string;
   track?: [number, number][];
+  mission_status?: MissionStatus;
+  current_mission?: VesselMission;
+  forecast_latitude?: number;
+  forecast_longitude?: number;
+  forecast_heading?: number;
+  distance_covered_km?: number;
+  remaining_dist_km?: number;
+  time_to_arrival_hours?: number;
 }
 
 export interface RouteOption {
@@ -46,6 +77,20 @@ export interface RouteOption {
   sicExposure?: number;
   reason?: string;
   decision_explanation?: string;
+  decision_support?: {
+    route_profile: string;
+    risk_level: string;
+    risk_score: number;
+    eta: string;
+    distance: string;
+    distance_km: number;
+    fuel_estimate: string;
+    dominant_hazard: string;
+    hazard_summary: string;
+    recommendation: string;
+    is_recommended: boolean;
+    provenance: string;
+  };
   fuelConsumption?: string | number;
   fuelSavings?: string;
   safetyMargin?: string;
@@ -303,15 +348,188 @@ export const CANONICAL_STATIONS: AntarcticStation[] = [
 export type MissionType = 'RESEARCH' | 'SUPPLY' | 'EMERGENCY' | 'ICE_OBSERVATION';
 export type OptimizationPriority = 'BALANCED' | 'SAFEST' | 'FASTEST' | 'FUEL';
 
+export function haversineDistKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+  return R * c;
+}
+
+export function computeBearingDeg(p1: [number, number], p2: [number, number]): number {
+  if (!p1 || !p2) return 180;
+  const dLon = (p2[1] - p1[1]) * Math.PI / 180;
+  const lat1 = p1[0] * Math.PI / 180;
+  const lat2 = p2[0] * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return Math.round((Math.atan2(y, x) * 180 / Math.PI + 360) % 360);
+}
+
+export function calculateVesselPositionAtHorizon(
+  vessel: CanonicalVessel,
+  route: RouteOption | null,
+  horizonHours: ForecastHorizonHours
+): {
+  latitude: number;
+  longitude: number;
+  heading: number;
+  status: MissionStatus;
+  distanceCoveredKm: number;
+  remainingDistKm: number;
+  etaHours: number;
+} {
+  // 1. LIVE AIS vessels: NEVER fabricate future movement (Rule 14 & Step 8)
+  if (vessel.data_status === 'LIVE' || vessel.source === 'AIS') {
+    return {
+      latitude: vessel.latitude,
+      longitude: vessel.longitude,
+      heading: vessel.heading || 180,
+      status: (vessel.mission_status || 'UNDERWAY') as MissionStatus,
+      distanceCoveredKm: 0,
+      remainingDistKm: 0,
+      etaHours: 0
+    };
+  }
+
+  // 2. Stationary mission states
+  if (vessel.mission_status === 'AVAILABLE') {
+    return {
+      latitude: vessel.latitude,
+      longitude: vessel.longitude,
+      heading: vessel.heading || 180,
+      status: 'AVAILABLE',
+      distanceCoveredKm: 0,
+      remainingDistKm: 0,
+      etaHours: 0
+    };
+  }
+
+  if (vessel.mission_status === 'ARRIVED') {
+    const arrLat = vessel.dest_lat !== undefined ? vessel.dest_lat : vessel.latitude;
+    const arrLon = vessel.dest_lon !== undefined ? vessel.dest_lon : vessel.longitude;
+    return {
+      latitude: arrLat,
+      longitude: arrLon,
+      heading: vessel.heading || 180,
+      status: 'ARRIVED',
+      distanceCoveredKm: vessel.distance_covered_km || 0,
+      remainingDistKm: 0,
+      etaHours: 0
+    };
+  }
+
+  // 3. UNDERWAY: Compute position along route path
+  const path: [number, number][] = route?.path && route.path.length >= 2 ? route.path : [];
+  if (path.length < 2) {
+    return {
+      latitude: vessel.latitude,
+      longitude: vessel.longitude,
+      heading: vessel.heading || 180,
+      status: (vessel.mission_status || 'UNDERWAY') as MissionStatus,
+      distanceCoveredKm: 0,
+      remainingDistKm: 0,
+      etaHours: 24
+    };
+  }
+
+  // Calculate cumulative distances along route vertices
+  const segDists: number[] = [];
+  let totalRouteDistKm = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const d = haversineDistKm(path[i][0], path[i][1], path[i + 1][0], path[i + 1][1]);
+    segDists.push(d);
+    totalRouteDistKm += d;
+  }
+
+  const speedKnots = vessel.speed || vessel.sog || 13.5;
+  const speedKmh = speedKnots * 1.852;
+  const totalEtaHours = totalRouteDistKm > 0 && speedKmh > 0 ? totalRouteDistKm / speedKmh : 24.0;
+
+  // Horizon 0 (NOW)
+  if (horizonHours === 0) {
+    return {
+      latitude: path[0][0],
+      longitude: path[0][1],
+      heading: computeBearingDeg(path[0], path[1]),
+      status: 'UNDERWAY',
+      distanceCoveredKm: 0,
+      remainingDistKm: Math.round(totalRouteDistKm),
+      etaHours: Math.round(totalEtaHours * 10) / 10
+    };
+  }
+
+  // If horizon reaches or exceeds total travel time, the vessel has ARRIVED at destination
+  if (horizonHours >= totalEtaHours) {
+    const lastPt = path[path.length - 1];
+    return {
+      latitude: lastPt[0],
+      longitude: lastPt[1],
+      heading: computeBearingDeg(path[path.length - 2], lastPt),
+      status: 'ARRIVED',
+      distanceCoveredKm: Math.round(totalRouteDistKm),
+      remainingDistKm: 0,
+      etaHours: 0
+    };
+  }
+
+  // Traversal along route polyline
+  const targetDistKm = speedKmh * horizonHours;
+  let accumulatedDist = 0;
+
+  for (let i = 0; i < segDists.length; i++) {
+    const segLen = segDists[i];
+    if (accumulatedDist + segLen >= targetDistKm || i === segDists.length - 1) {
+      const remainingInSeg = targetDistKm - accumulatedDist;
+      const frac = segLen > 0 ? Math.max(0, Math.min(1, remainingInSeg / segLen)) : 0;
+      const pA = path[i];
+      const pB = path[i + 1];
+      const interpLat = pA[0] + frac * (pB[0] - pA[0]);
+      const interpLon = pA[1] + frac * (pB[1] - pA[1]);
+      const heading = computeBearingDeg(pA, pB);
+      return {
+        latitude: Number(interpLat.toFixed(4)),
+        longitude: Number(interpLon.toFixed(4)),
+        heading,
+        status: 'UNDERWAY',
+        distanceCoveredKm: Math.round(targetDistKm),
+        remainingDistKm: Math.round(Math.max(0, totalRouteDistKm - targetDistKm)),
+        etaHours: Math.round(Math.max(0, totalEtaHours - horizonHours) * 10) / 10
+      };
+    }
+    accumulatedDist += segLen;
+  }
+
+  const lastPt = path[path.length - 1];
+  return {
+    latitude: lastPt[0],
+    longitude: lastPt[1],
+    heading: vessel.heading || 180,
+    status: 'ARRIVED',
+    distanceCoveredKm: Math.round(totalRouteDistKm),
+    remainingDistKm: 0,
+    etaHours: 0
+  };
+}
+
 interface FleetContextType {
   fleet: CanonicalVessel[];
+  displayFleet: CanonicalVessel[];
   selectedVesselId: string;
   selectedVessel: CanonicalVessel;
+  activeDisplayVessel: CanonicalVessel;
   setSelectedVesselId: (id: string) => void;
   stations: AntarcticStation[];
   selectedDestinationId: string;
   selectedDestination: AntarcticStation;
   setSelectedDestinationId: (id: string) => void;
+  selectedHorizon: ForecastHorizonHours;
+  setSelectedHorizon: (h: ForecastHorizonHours) => void;
+  activeHorizonLabel: ForecastHorizonLabel;
   missionId: string;
   missionType: MissionType;
   setMissionType: (type: MissionType) => void;
@@ -356,6 +574,13 @@ interface FleetContextType {
   triggerEmergencyHazard: () => Promise<void>;
   dismissTacticalAlert: () => void;
   recomputeRoutes: () => Promise<void>;
+  assignMission: (
+    vesselId: string,
+    destinationStationId: string,
+    missionType: MissionType,
+    routeProfile: OptimizationPriority
+  ) => Promise<void>;
+  resetVesselToAvailable: (vesselId: string) => void;
   whatIfScenario: {
     active: boolean;
     icebergDriftOffsetKm: number;
@@ -425,6 +650,17 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [activeRouteId, setActiveRouteId] = useState<string>('route-b');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const routeCacheRef = useRef<Map<string, RouteOption[]>>(new Map());
+
+  // Shared forecast horizon state across all platforms (NOW / +6H / +12H / +24H / +48H)
+  const [selectedHorizon, setSelectedHorizonState] = useState<ForecastHorizonHours>(0);
+  const setSelectedHorizon = useCallback((h: ForecastHorizonHours) => {
+    setSelectedHorizonState(h);
+  }, []);
+
+  const activeHorizonLabel: ForecastHorizonLabel = useMemo(() => {
+    if (selectedHorizon === 0) return 'NOW';
+    return `+${selectedHorizon}H` as ForecastHorizonLabel;
+  }, [selectedHorizon]);
 
   // Set selected vessel with persistence
   const setSelectedVesselId = useCallback((id: string) => {
@@ -816,6 +1052,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           sicExposure: r.sicExposure ?? (r.id?.includes('route-a') ? 65 : r.id?.includes('route-b') ? 22 : 6),
           reason: r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
           decision_explanation: r.decision_explanation || r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
+          decision_support: r.decision_support || undefined,
           fuelConsumption: r.fuelConsumption || r.fuel_estimate || '104 MT',
           safetyMargin: r.safetyMargin || 'OPTIMAL',
           costs: r.costs || r.cost_breakdown || {},
@@ -879,6 +1116,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           sicExposure: r.sicExposure ?? (r.id?.includes('route-a') ? 65 : r.id?.includes('route-b') ? 22 : 6),
           reason: r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
           decision_explanation: r.decision_explanation || r.reason || `Optimized polar navigation corridor for ${selectedVessel.name}.`,
+          decision_support: r.decision_support || undefined,
           fuelConsumption: r.fuelConsumption || r.fuel_estimate || '104 MT',
           safetyMargin: r.safetyMargin || 'OPTIMAL',
           costs: r.costs || r.cost_breakdown || {},
@@ -914,15 +1152,190 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return routes.find(r => r.id === activeRouteId || r.id?.includes(activeRouteId)) || routes[0] || null;
   }, [routes, activeRouteId]);
 
+  // 1. Calculate deterministic display fleet at selected forecast horizon
+  const displayFleet = useMemo<CanonicalVessel[]>(() => {
+    return fleet.map(v => {
+      // LIVE AIS: strictly maintain latest observed telemetry (do NOT fabricate forecast movement)
+      if (v.data_status === 'LIVE' || v.source === 'AIS') {
+        return {
+          ...v,
+          mission_status: (v.mission_status || 'UNDERWAY') as MissionStatus,
+          forecast_latitude: v.latitude,
+          forecast_longitude: v.longitude,
+          forecast_heading: v.heading || 180,
+          distance_covered_km: 0,
+          remaining_dist_km: 0
+        };
+      }
+
+      // Determine active corridor for this vessel
+      let vRoute: RouteOption | null = null;
+      if (v.id === selectedVesselId && activeRoute && activeRoute.path && activeRoute.path.length >= 2) {
+        vRoute = activeRoute;
+      } else {
+        const destStation = stations.find(s => s.id === v.destination_station_id) || {
+          id: v.destination_station_id || 'dest',
+          name: v.destination,
+          latitude: v.dest_lat || -69.41,
+          longitude: v.dest_lon || 76.19
+        };
+        const corridors = generateFallbackCorridors(v, destStation);
+        vRoute = corridors[0] || null;
+      }
+
+      const computed = calculateVesselPositionAtHorizon(v, vRoute, selectedHorizon);
+      return {
+        ...v,
+        latitude: computed.latitude,
+        longitude: computed.longitude,
+        heading: computed.heading,
+        mission_status: computed.status,
+        forecast_latitude: computed.latitude,
+        forecast_longitude: computed.longitude,
+        forecast_heading: computed.heading,
+        distance_covered_km: computed.distanceCoveredKm,
+        remaining_dist_km: computed.remainingDistKm,
+        time_to_arrival_hours: computed.etaHours
+      };
+    });
+  }, [fleet, selectedVesselId, activeRoute, stations, selectedHorizon, generateFallbackCorridors]);
+
+  // 2. Active vessel evaluated at selected horizon
+  const activeDisplayVessel = useMemo(() => {
+    return displayFleet.find(v => v.id === selectedVesselId || String(v.mmsi) === selectedVesselId) || displayFleet[0];
+  }, [displayFleet, selectedVesselId]);
+
+  // 3. Assign New Mission (Starts strictly from arrival destination, invokes canonical PolarRoutingEngine)
+  const assignMission = useCallback(async (
+    vesselId: string,
+    destinationStationId: string,
+    newMissionType: MissionType,
+    routeProfile: OptimizationPriority
+  ) => {
+    setIsComputingRoutes(true);
+    try {
+      const vessel = fleet.find(v => v.id === vesselId) || fleet[0];
+      const destStation = stations.find(s => s.id === destinationStationId) || stations[0];
+
+      // Origin: If vessel arrived, its current origin is its arrival station
+      const startLat = vessel.mission_status === 'ARRIVED' && vessel.dest_lat !== undefined
+        ? vessel.dest_lat
+        : vessel.latitude;
+      const startLon = vessel.mission_status === 'ARRIVED' && vessel.dest_lon !== undefined
+        ? vessel.dest_lon
+        : vessel.longitude;
+      const originName = vessel.mission_status === 'ARRIVED'
+        ? vessel.destination
+        : (vessel.voyage_origin || 'Current Location');
+
+      // Call canonical PolarRoutingEngine via backend POST /api/routes/optimize
+      const optRes = await api.routesOptimize({
+        vessel_id: vessel.id,
+        vessel_name: vessel.name,
+        start_lat: startLat,
+        start_lon: startLon,
+        dest_lat: destStation.latitude,
+        dest_lon: destStation.longitude,
+        destination: destStation.name,
+        cruising_speed_kn: vessel.speed || vessel.sog || 14.0,
+        polar_class: vessel.polar_class || 'PC5'
+      });
+
+      let newRoutes: RouteOption[] = [];
+      if (optRes?.routes?.length) {
+        newRoutes = optRes.routes.map((r: any, idx: number) => ({
+          id: r.id || (idx === 1 ? `${vessel.id}-route-b` : idx === 2 ? `${vessel.id}-route-c` : `${vessel.id}-route-a`),
+          name: r.name || (idx === 1 ? 'ROUTE B (OPTIMAL)' : idx === 2 ? 'ROUTE C (SAFEST)' : 'ROUTE A (FASTEST)'),
+          vessel_id: vessel.id,
+          distance: typeof r.distance_km === 'number' ? r.distance_km : parseFloat(String(r.distance || '').replace(/[^0-9.]/g, '')) || 3800,
+          eta: r.eta || '32h 05m',
+          iceRisk: r.iceRisk || 'MODERATE',
+          icebergRisk: r.icebergRisk || 'LOW',
+          weatherRisk: r.weatherRisk || 'MODERATE',
+          overallScore: r.overallScore || 90,
+          recommended: r.recommended ?? (idx === 1),
+          rioScore: r.rioScore ?? '+8.4',
+          sicExposure: r.sicExposure ?? 20,
+          reason: r.reason || `Optimized polar navigation corridor towards ${destStation.name}.`,
+          decision_explanation: r.decision_explanation || r.reason,
+          decision_support: r.decision_support || undefined,
+          fuelConsumption: r.fuelConsumption || r.fuel_estimate || '104 MT',
+          safetyMargin: 'OPTIMAL',
+          path: r.path || [],
+          waypoints: r.waypoints || []
+        }));
+      } else {
+        const tempV: CanonicalVessel = {
+          ...vessel,
+          latitude: startLat,
+          longitude: startLon
+        };
+        newRoutes = generateFallbackCorridors(tempV, destStation);
+      }
+
+      // Update fleet state with new mission
+      setFleet(prev => prev.map(v => {
+        if (v.id === vessel.id) {
+          return {
+            ...v,
+            latitude: startLat,
+            longitude: startLon,
+            destination_station_id: destStation.id,
+            destination: destStation.name,
+            dest_lat: destStation.latitude,
+            dest_lon: destStation.longitude,
+            voyage_origin: originName,
+            mission_status: 'UNDERWAY' as MissionStatus,
+            nav_status: 'Underway using engine',
+            eta: newRoutes[0]?.eta || '32h 00m'
+          };
+        }
+        return v;
+      }));
+
+      setSelectedDestinationIdState(destStation.id);
+      setMissionTypeState(newMissionType);
+      setOptimizationPriority(routeProfile);
+      setRoutes(newRoutes);
+      const rec = newRoutes.find(r => r.recommended) || newRoutes[0];
+      if (rec) setActiveRouteId(rec.id);
+      // Reset horizon to NOW so operator sees departure state
+      setSelectedHorizonState(0);
+    } catch (err) {
+      console.error('Failed to assign new mission:', err);
+    } finally {
+      setIsComputingRoutes(false);
+    }
+  }, [fleet, stations, generateFallbackCorridors]);
+
+  // 4. Reset vessel to AVAILABLE (Moored at berth)
+  const resetVesselToAvailable = useCallback((vesselId: string) => {
+    setFleet(prev => prev.map(v => {
+      if (v.id === vesselId) {
+        return {
+          ...v,
+          mission_status: 'AVAILABLE' as MissionStatus,
+          nav_status: 'Moored / Berth Available'
+        };
+      }
+      return v;
+    }));
+  }, []);
+
   const value = useMemo(() => ({
-    fleet,
+    fleet: displayFleet,
+    displayFleet,
     selectedVesselId,
-    selectedVessel,
+    selectedVessel: activeDisplayVessel,
+    activeDisplayVessel,
     setSelectedVesselId,
     stations,
     selectedDestinationId,
     selectedDestination,
     setSelectedDestinationId,
+    selectedHorizon,
+    setSelectedHorizon,
+    activeHorizonLabel,
     missionId,
     missionType,
     setMissionType,
@@ -946,16 +1359,21 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     isComputingRoutes,
     refreshFleet,
     recomputeRoutes,
+    assignMission,
+    resetVesselToAvailable,
     setCustomDestination
   }), [
-    fleet,
+    displayFleet,
     selectedVesselId,
-    selectedVessel,
+    activeDisplayVessel,
     setSelectedVesselId,
     stations,
     selectedDestinationId,
     selectedDestination,
     setSelectedDestinationId,
+    selectedHorizon,
+    setSelectedHorizon,
+    activeHorizonLabel,
     missionId,
     missionType,
     setMissionType,
@@ -974,6 +1392,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     isComputingRoutes,
     refreshFleet,
     recomputeRoutes,
+    assignMission,
+    resetVesselToAvailable,
     setCustomDestination
   ]);
 

@@ -141,7 +141,7 @@ class PolarFuelEngine:
 
         reason_text = (
             f"{rec_name} is recommended for {vessel_name} to {destination_name}. "
-            f"It achieves the lowest Pareto composite cost ({rec_tot}) by navigating open leads, "
+            f"It achieves the lowest multi-objective composite cost ({rec_tot}) by navigating open leads, "
             f"minimizing iceberg CPA proximity, and optimizing fuel consumption. "
             + " ".join(comparisons)
         )

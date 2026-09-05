@@ -37,7 +37,10 @@ export const OverviewPage: React.FC = () => {
     setActiveRouteId,
     activeRoute,
     selectedIcebergId,
-    setSelectedIcebergId
+    setSelectedIcebergId,
+    selectedHorizon,
+    setSelectedHorizon,
+    activeHorizonLabel
   } = useFleet();
 
   const currentRoute = activeRoute || routes[0] || {
@@ -48,16 +51,43 @@ export const OverviewPage: React.FC = () => {
     rioScore: '+8.4'
   };
 
+  const horizonOptions: { hours: 0 | 6 | 12 | 24 | 48; label: 'NOW' | '+6H' | '+12H' | '+24H' | '+48H' }[] = [
+    { hours: 0, label: 'NOW' },
+    { hours: 6, label: '+6H' },
+    { hours: 12, label: '+12H' },
+    { hours: 24, label: '+24H' },
+    { hours: 48, label: '+48H' },
+  ];
+
   return (
     <AppShell
       title="Overview"
       subtitle="Antarctic Operational Monitoring & Situational Awareness"
       actions={
         <div className="flex items-center gap-2.5 font-mono text-xs">
+          {/* Shared 48h Forecast Horizon Selector */}
+          <div className="flex items-center bg-polar-navy/60 border border-slate/30 rounded-sm p-0.5">
+            {horizonOptions.map((h) => (
+              <button
+                key={h.hours}
+                type="button"
+                onClick={() => setSelectedHorizon(h.hours)}
+                className={cn(
+                  "px-2 py-0.5 rounded-xs text-[10px] font-mono transition-all",
+                  selectedHorizon === h.hours
+                    ? "bg-glacial-blue text-navy font-bold shadow-xs"
+                    : "text-slate-400 hover:text-white"
+                )}
+              >
+                {h.label}
+              </button>
+            ))}
+          </div>
+
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-polar-navy/40 border border-slate/20 rounded-sm text-slate-300">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className={cn("w-2 h-2 rounded-full animate-pulse", selectedVessel.data_status === 'LIVE' ? "bg-emerald-400" : "bg-amber-400")} />
             <span className="text-slate-400">TELEMETRY:</span>
-            <span className="text-ice-white font-semibold">LIVE</span>
+            <span className="text-ice-white font-semibold">{selectedVessel.data_status === 'LIVE' ? 'LIVE AIS' : 'SIMULATED VOYAGE'}</span>
           </div>
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-polar-navy/40 border border-slate/20 rounded-sm text-slate-300">
             <ShieldAlert className="w-3.5 h-3.5 text-emerald-400" />
@@ -79,6 +109,7 @@ export const OverviewPage: React.FC = () => {
         <div className="flex-1 relative w-full h-full overflow-hidden">
           <PolarMap
             section="overview"
+            activeHorizon={activeHorizonLabel}
             selectedIcebergId={selectedIcebergId}
             onSelectIceberg={(id) => setSelectedIcebergId(id)}
             selectedVesselId={selectedVesselId}

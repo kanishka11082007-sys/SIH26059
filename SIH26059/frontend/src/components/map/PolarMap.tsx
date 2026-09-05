@@ -404,11 +404,15 @@ export const PolarMap: React.FC<PolarMapProps> = ({
   const effectiveShowRoute = showRoute !== undefined ? showRoute : sectionConfig.showRoute;
   const { 
     fleet: contextFleet, 
+    displayFleet: contextDisplayFleet,
     selectedVesselId: contextSelectedVesselId, 
     setSelectedVesselId: contextSetSelectedVesselId,
     selectedIcebergId: contextSelectedIcebergId,
-    setSelectedIcebergId: contextSetSelectedIcebergId
+    setSelectedIcebergId: contextSetSelectedIcebergId,
+    activeHorizonLabel: contextActiveHorizonLabel
   } = useFleet();
+
+  const effectiveHorizon = activeHorizon || contextActiveHorizonLabel || 'NOW';
 
   const activeSelectedIcebergId = selectedIcebergId !== undefined && selectedIcebergId !== null 
     ? selectedIcebergId 
@@ -502,6 +506,8 @@ export const PolarMap: React.FC<PolarMapProps> = ({
 
   const fleetVessels: any[] = externalVessels && externalVessels.length > 0
     ? externalVessels
+    : contextDisplayFleet && contextDisplayFleet.length > 0
+    ? contextDisplayFleet
     : contextFleet && contextFleet.length > 0
     ? contextFleet
     : CANONICAL_FLEET;
@@ -1220,7 +1226,7 @@ export const PolarMap: React.FC<PolarMapProps> = ({
     activeVessel?.latitude,
     activeVessel?.longitude,
     oceanCurrentsData,
-    activeHorizon,
+    effectiveHorizon,
     onSelectIceberg,
     onSelectRoute,
     activeRouteKey,
@@ -1255,6 +1261,13 @@ export const PolarMap: React.FC<PolarMapProps> = ({
         const cleanName = v.name.replace(' — DEMO', '').replace('R/V ', '').replace('RRS ', '').replace('S.A. ', '').split(' (')[0];
         const vSpeed = (v.speed ?? (v as any).sog ?? 13.5);
         const vHeading = v.heading || 180;
+        const isArrived = v.mission_status === 'ARRIVED';
+        const isAvailable = v.mission_status === 'AVAILABLE';
+        const statusLabel = isArrived 
+          ? `ARRIVED @ ${v.destination ? v.destination.split(' ')[0] : 'PORT'}` 
+          : isAvailable 
+          ? 'AVAILABLE' 
+          : `${vSpeed} kn`;
         
         if (isSelected) {
           // RANK 1: ACTIVE VESSEL (Bright Cyan/White, Active Beacon Pulse, Heading Vector)
@@ -1265,13 +1278,13 @@ export const PolarMap: React.FC<PolarMapProps> = ({
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="#00F2FE" stroke="#FFFFFF" stroke-width="2"><polygon points="12 2 19 21 12 17 5 21 12 2"/></svg>
               </div>
               <span style="position:absolute;bottom:-14px;font-family:monospace;font-size:9.5px;font-weight:bold;color:#00F2FE;background:#040B16;padding:2px 6px;border-radius:3px;border:1px solid #00F2FE;white-space:nowrap;box-shadow:0 0 10px rgba(0,242,254,0.45);pointer-events:none;">
-                ★ ${cleanName} • ${vSpeed} kn
+                ★ ${cleanName} • ${statusLabel}
               </span>
             </div>`;
         } else {
           // RANK 6: OTHER FLEET VESSELS (Muted Slate, Interactive on Hover & Click)
           vesselEl.innerHTML = `
-            <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;pointer-events:none;" title="${cleanName} (${vSpeed} kn)">
+            <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;pointer-events:none;" title="${cleanName} (${statusLabel})">
               <div style="width:24px;height:24px;border-radius:50%;background:#0A1322;border:1.5px solid #64748B;display:flex;align-items:center;justify-content:center;transform:rotate(${vHeading}deg);box-shadow:0 0 8px rgba(100,116,139,0.5);pointer-events:none;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="#94A3B8" stroke="#FFFFFF" stroke-width="1.5"><polygon points="12 2 19 21 12 17 5 21 12 2"/></svg>
               </div>
@@ -1407,8 +1420,25 @@ export const PolarMap: React.FC<PolarMapProps> = ({
       const isZoomHigh = mapZoomRef.current >= 5.6;
 
       activeIcebergs.forEach((ib: any) => {
-        const lon = ib.origin_longitude ?? ib.longitude;
-        const lat = ib.origin_latitude ?? ib.latitude;
+        // Resolve iceberg coordinate, heading and provenance at effectiveHorizon
+        let lon = ib.origin_longitude ?? ib.longitude;
+        let lat = ib.origin_latitude ?? ib.latitude;
+        let bearingDeg = parseFloat(ib.direction || '0') || (ib.forecastPoints?.[1]?.bearingDeg ?? 90);
+        let provenanceTag = 'OBSERVED (BYU/NIC TRACK)';
+
+        if (effectiveHorizon !== 'NOW' && ib.forecastPoints && ib.forecastPoints.length > 0) {
+          const matchFp = ib.forecastPoints.find((p: any) => 
+            p.horizon === effectiveHorizon || 
+            p.horizon?.replace('+', '') === effectiveHorizon.replace('+', '')
+          );
+          if (matchFp && matchFp.coordinates && typeof matchFp.coordinates[0] === 'number') {
+            lat = matchFp.coordinates[0];
+            lon = matchFp.coordinates[1];
+            if (matchFp.bearingDeg !== undefined) bearingDeg = matchFp.bearingDeg;
+            provenanceTag = `FORECAST ${effectiveHorizon} (RF MODEL)`;
+          }
+        }
+
         if (typeof lon !== 'number' || typeof lat !== 'number' || isNaN(lon) || isNaN(lat)) return;
 
         const isSelected = activeSelectedIcebergId === ib.id;
@@ -1434,7 +1464,6 @@ export const PolarMap: React.FC<PolarMapProps> = ({
         // Heading needle visibility
         const showNeedle = isSelected || isZoomHigh || (isZoomMed && isHigh);
         const bearingStr = ib.direction || '0°T';
-        const bearingDeg = parseFloat(bearingStr) || (ib.forecastPoints?.[1]?.bearingDeg ?? 90);
 
         // Smart Label Filtering:
         // - Low zoom (<4.2): ONLY selected iceberg shows label (prevents 85 overlapping black boxes)
@@ -1540,17 +1569,24 @@ export const PolarMap: React.FC<PolarMapProps> = ({
         ibEl.addEventListener('click', (e) => {
           e.stopPropagation();
           handleIcebergSelect(ib.id);
+          const vLat = activeVessel?.latitude ?? -65.0;
+          const vLon = activeVessel?.longitude ?? -64.0;
+          const dLat = (lat - vLat) * 111.0;
+          const dLon = (lon - vLon) * 111.0 * Math.cos((vLat * Math.PI) / 180);
+          const liveDistKm = Math.round(Math.sqrt(dLat * dLat + dLon * dLon));
+
           setSelectedEntityInfo({
             title: `Iceberg ${ib.id} (${ib.name || 'Shelf Fragment'})`,
-            badge: ib.risk || 'CAUTION',
+            badge: effectiveHorizon === 'NOW' ? (ib.risk || 'CAUTION') : `${ib.risk || 'CAUTION'} • ${effectiveHorizon}`,
             badgeColor: color,
             details: [
               { label: 'Surface Area', value: `${area} km² ${isGiant ? '(Giant Tabular)' : ''}` },
-              { label: 'Drift Speed', value: `${ib.velocity || 0.42} kn (${bearingStr})` },
+              { label: 'Drift Speed', value: `${velNum.toFixed(1)} kn (${bearingStr})` },
               { label: 'Draft Estimate', value: `${ib.draftEstimate || 320} m keel depth` },
+              { label: 'Separation @ Horizon', value: `${liveDistKm} km to ${activeVessel?.name ? activeVessel.name.replace(' — DEMO', '').split(' ')[0] : 'Vessel'}` },
               { label: 'Confidence', value: `${ib.confidence || 94.8}%` },
-              { label: 'Coordinates', value: `${Math.abs(Number(lat.toFixed(2)))}°S, ${Math.abs(Number(lon.toFixed(2)))}°${lon >= 0 ? 'E' : 'W'}` },
-              { label: 'Sensor Source', value: ib.sensorSource || 'BYU/NIC Polar MERS Radar' }
+              { label: 'Coordinates @ Horizon', value: `${Math.abs(Number(lat.toFixed(2)))}°S, ${Math.abs(Number(lon.toFixed(2)))}°${lon >= 0 ? 'E' : 'W'}` },
+              { label: 'Data Provenance', value: provenanceTag }
             ]
           });
         });
@@ -1575,6 +1611,7 @@ export const PolarMap: React.FC<PolarMapProps> = ({
     activeVessel,
     activeIcebergs,
     activeSelectedIcebergId,
+    effectiveHorizon,
     onSelectIceberg
   ]);
 

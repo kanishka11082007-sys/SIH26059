@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   Activity, Snowflake, ShieldAlert, Clock, BarChart3, Wind, LineChart as LucideLineChart, Ship
 } from 'lucide-react';
@@ -10,15 +10,6 @@ import { useApiData } from "../../hooks/useApiData";
 import { useTimeData } from "../../hooks/useTimeData";
 import { useFleet } from "../../context/FleetContext";
 import { cn } from '../../utils/cn';
-
-// Standardized 5-step forecast timeline mapped to backend tensors (0: Now, 1: +6h, 2: +12h, 3: +24h, 4: +48h)
-const TIME_MAP: Record<string, string> = {
-  'current': '0',
-  '6h': '1',
-  '12h': '2',
-  '24h': '3',
-  '48h': '4',
-};
 
 const FORECAST_TREND_DATA = [
   { horizon: 'Now (T+0)', sic: 64, wind: 23.6, temp: -17.9, overallRisk: 50, rio: 6.8 },
@@ -39,11 +30,25 @@ const POLAR_CLASS_RIO = [
 ];
 
 export const AnalysisPage: React.FC = () => {
-  const { fleet, selectedVessel, selectedVesselId, setSelectedVesselId } = useFleet();
-  const [timeStep, setTimeStep] = useState<'current' | '6h' | '12h' | '24h' | '48h'>('current');
+  const {
+    fleet,
+    selectedVessel,
+    selectedVesselId,
+    setSelectedVesselId,
+    selectedHorizon,
+    setSelectedHorizon,
+    activeHorizonLabel
+  } = useFleet();
   useApiData();
   
-  const apiTimeStep = TIME_MAP[timeStep] || '0';
+  const HORIZON_TO_TIMESTEP: Record<number, string> = {
+    0: '0',
+    6: '6',
+    12: '12',
+    24: '24',
+    48: '48'
+  };
+  const apiTimeStep = HORIZON_TO_TIMESTEP[selectedHorizon] || '0';
   const { environmental } = useTimeData(apiTimeStep);
 
   const env = environmental || {
@@ -90,25 +95,31 @@ export const AnalysisPage: React.FC = () => {
         <div className="bg-polar-navy/30 p-2.5 rounded-sm border border-slate/20 flex flex-col sm:flex-row items-center justify-between gap-4 font-mono text-xs">
           <div className="flex items-center gap-2">
             <Clock className="w-3.5 h-3.5 text-glacial-blue" />
-            <span className="text-slate-400 text-[10px] uppercase font-semibold">TIMESTEP EVALUATION:</span>
+            <span className="text-slate-400 text-[10px] uppercase font-semibold">SHARED OPERATIONAL HORIZON:</span>
             <span className="text-glacial-blue font-semibold bg-polar-navy/60 px-2 py-0.5 rounded-sm border border-slate/20">
-              {env.timestep}
+              {activeHorizonLabel} ({env.timestep})
             </span>
           </div>
           <div className="flex items-center gap-1 w-full sm:w-auto bg-polar-navy/40 p-1 rounded-sm border border-slate/20">
-            {(['current', '6h', '12h', '24h', '48h'] as const).map((t) => (
+            {([
+              { hours: 0, label: 'NOW' },
+              { hours: 6, label: '+6H' },
+              { hours: 12, label: '+12H' },
+              { hours: 24, label: '+24H' },
+              { hours: 48, label: '+48H' }
+            ] as const).map(({ hours, label }) => (
               <button
-                key={t}
+                key={hours}
                 type="button"
-                onClick={() => setTimeStep(t)}
+                onClick={() => setSelectedHorizon(hours)}
                 className={cn(
                   "px-3 py-1 rounded-sm text-xs font-mono transition-all uppercase",
-                  timeStep === t
+                  selectedHorizon === hours
                     ? "bg-glacial-blue/20 text-ice-blue border border-glacial-blue/50 font-bold"
                     : "text-slate-400 hover:text-white"
                 )}
               >
-                {t === 'current' ? 'Now' : `+${t.toUpperCase()}`}
+                {label}
               </button>
             ))}
           </div>

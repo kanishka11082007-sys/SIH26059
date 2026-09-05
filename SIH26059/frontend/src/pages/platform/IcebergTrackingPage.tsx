@@ -53,24 +53,26 @@ export const IcebergTrackingPage: React.FC = () => {
     selectedDestination,
     routes,
     activeRouteId,
-    setActiveRouteId
+    setActiveRouteId,
+    selectedHorizon,
+    setSelectedHorizon,
+    activeHorizonLabel
   } = useFleet();
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
-  const [activeHorizon, setActiveHorizon] = useState<'NOW' | '+6H' | '+12H' | '+24H' | '+48H'>('NOW');
   const [icebergs, setIcebergs] = useState<Iceberg[]>([]);
   useApiData();
 
   // Re-fetch icebergs when horizon changes
   const fetchIcebergs = useCallback(async () => {
     try {
-      const res = await api.icebergs(activeHorizon);
+      const res = await api.icebergs(activeHorizonLabel);
       if (res?.icebergs?.length) {
         setIcebergs(res.icebergs);
       }
     } catch (e) {
       console.error('[IcebergPage] fetch error:', e);
     }
-  }, [activeHorizon]);
+  }, [activeHorizonLabel]);
 
   useEffect(() => {
     fetchIcebergs();
@@ -97,8 +99,16 @@ export const IcebergTrackingPage: React.FC = () => {
     : undefined;
 
   const activeForecastPoint = selectedIceberg?.forecastPoints?.find(
-    (fp: any) => fp.horizon === activeHorizon
+    (fp: any) => fp.horizon === activeHorizonLabel
   );
+
+  const horizonOptions: { hours: 0 | 6 | 12 | 24 | 48; label: 'NOW' | '+6H' | '+12H' | '+24H' | '+48H' }[] = [
+    { hours: 0, label: 'NOW' },
+    { hours: 6, label: '+6H' },
+    { hours: 12, label: '+12H' },
+    { hours: 24, label: '+24H' },
+    { hours: 48, label: '+48H' },
+  ];
 
   return (
     <AppShell
@@ -217,25 +227,25 @@ export const IcebergTrackingPage: React.FC = () => {
                     </span>
                     {activeForecastPoint && (
                       <span className="text-ice-white">
-                        +{activeForecastPoint.displacementKm} km @ {activeHorizon}
+                        +{activeForecastPoint.displacementKm} km @ {activeHorizonLabel}
                         {activeForecastPoint.uncertaintyRadiusKm ? ` (±${activeForecastPoint.uncertaintyRadiusKm}km)` : ''}
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-1 bg-polar-navy/40 p-1 rounded-sm border border-slate/20">
-                    {(['NOW', '+6H', '+12H', '+24H', '+48H'] as const).map((h) => (
+                    {horizonOptions.map((h) => (
                       <button
-                        key={h}
+                        key={h.hours}
                         type="button"
-                        onClick={() => setActiveHorizon(h)}
+                        onClick={() => setSelectedHorizon(h.hours)}
                         className={cn(
                           "flex-1 py-1 rounded-sm text-[10px] font-mono transition-all",
-                          activeHorizon === h
+                          selectedHorizon === h.hours
                             ? "bg-glacial-blue/20 text-ice-blue border border-glacial-blue/50 font-bold"
                             : "text-slate-400 hover:text-white"
                         )}
                       >
-                        {h}
+                        {h.label}
                       </button>
                     ))}
                   </div>
@@ -324,7 +334,7 @@ export const IcebergTrackingPage: React.FC = () => {
             showRoute={true}
             selectedIcebergId={selectedIceberg?.id || null}
             onSelectIceberg={(id) => setSelectedIcebergId(id)}
-            activeHorizon={activeHorizon}
+            activeHorizon={activeHorizonLabel}
             icebergs={icebergs}
             selectedVesselId={selectedVesselId}
             onSelectVessel={(id) => setSelectedVesselId(id)}

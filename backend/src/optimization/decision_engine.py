@@ -1,3 +1,8 @@
+"""Navigation Decision Engine (DEPRECATED / PROTOTYPE).
+
+NOTE: Retained for backwards compatibility. The AUTHORITATIVE production routing pipeline is
+src.optimization.polar_routing_engine.PolarRoutingEngine.
+"""
 import time, logging, uuid, numpy as np
 from dataclasses import dataclass, field
 from typing import Optional

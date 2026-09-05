@@ -126,6 +126,28 @@ export const api = {
   emergency: (payload: { vessel_id?: string; dest_id?: string; hazard_type?: string; reason?: string; force_simulation?: boolean }) => 
     apiPost<{ emergency: boolean; status: string; alert: any; old_route: any; new_route: any; diverted_route: any; routes: any[]; heading_alteration_deg: number; clearance_km: number; extra_distance_km: number; extra_eta_minutes?: number; hazard_detected?: boolean; iceberg?: any; iceberg_id?: string; iceberg_name?: string; cpa_km?: number; tcpa_hours?: number; threat_level?: string; extra_fuel_mt?: number; local_reroute_applied?: boolean; unaffected_points_count?: number }>("/navigation/emergency", payload),
   restore: (payload?: any) => apiPost<{ status: string; corridor_clear: boolean }>("/navigation/restore", payload || {}),
+  simulationWhatIf: (payload: { vessel_id?: string; dest_id?: string; iceberg_drift_km?: number; sic_delta_pct?: number; wind_gust_kn?: number; dest_lat?: number; dest_lon?: number; dest_name?: string }) =>
+    apiPost<{
+      status: string;
+      is_what_if_analysis: boolean;
+      parameters: { iceberg_drift_km: number; sic_delta_pct: number; wind_gust_kn: number };
+      baseline: any;
+      scenario: any;
+      difference: {
+        distance_delta_km: number;
+        eta_delta_hours: number;
+        fuel_delta_mt: number;
+        risk_impact: string;
+        baseline_rio: string;
+        scenario_rio: string;
+      };
+      decision_summary: {
+        recommended_action: string;
+        dominant_threat: string;
+        recommendation: string;
+      };
+      explanation: string;
+    }>("/simulation/what-if", payload),
   metrics: () => apiFetch<Record<string, any>>("/metrics"),
   environmental: (timeStep?: string) => {
     const qs = timeStep ? `?time_step=${timeStep}` : "";
@@ -181,6 +203,25 @@ export const api = {
   dbStatus: () => apiFetch<any>("/db/status"),
   copilotStatus: () => apiFetch<{status: string; active_provider: string; gemini_authenticated: boolean; model: string}>("/copilot/status"),
   copilot: (decisionData: any, question?: string) => apiPost<any>("/copilot", { decision_data: decisionData, question }),
+  routesOptimize: (payload: {
+    vessel_id?: string;
+    vessel_name?: string;
+    start_lat: number;
+    start_lon: number;
+    dest_lat: number;
+    dest_lon: number;
+    destination: string;
+    cruising_speed_kn?: number;
+    polar_class?: string;
+  }) => apiPost<{
+    status: string;
+    vessel_id: string;
+    destination: string;
+    routes: any[];
+    recommended_route_id?: string;
+    generated_at: string;
+    engine: string;
+  }>("/routes/optimize", payload),
 };
 
 

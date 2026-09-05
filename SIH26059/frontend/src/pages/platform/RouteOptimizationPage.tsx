@@ -274,7 +274,7 @@ export const RouteOptimizationPage: React.FC = () => {
                 {isComputingRoutes && (
                   <div className="flex items-center gap-2 mt-2 px-2.5 py-1.5 bg-glacial-blue/10 border border-glacial-blue/30 rounded-sm text-[11px] font-mono text-glacial-blue animate-pulse">
                     <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                    <span>Calculating Pareto polar corridors...</span>
+                    <span>Calculating multi-objective polar corridors...</span>
                   </div>
                 )}
               </div>
